@@ -1,0 +1,27 @@
+[project]
+name = "office_bench"
+version = "0.1.0"
+description = "Benchmark harness for Office Agent"
+authors = [{ name = "Dino" }]
+requires-python = ">=3.12"
+dependencies = [
+    "requests>=2.31",
+    "openpyxl>=3.1.0",
+    "python-pptx>=1.0.0",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4,<10",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

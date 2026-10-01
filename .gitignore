@@ -19,3 +19,8 @@ venv/
 .idea/
 .vscode/
 .DS_Store
+
+# Benchmark harness
+data/benchmarks/datasets/
+data/benchmarks/PPTC/PPT_label_*
+results/benchmarks/*/workspaces/
