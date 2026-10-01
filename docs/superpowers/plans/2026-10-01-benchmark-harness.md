@@ -3569,7 +3569,7 @@ to Phase 6.
 
 
 
-- [ ] **Step 1: Create fixture test data**
+- [x] **Step 1: Create fixture test data**
 
 Create `benchmarks/tests/fixtures/spreadsheet/data/Debugging/dataset.json`:
 
@@ -3620,7 +3620,7 @@ Create `benchmarks/tests/fixtures/spreadsheet/data/Visualization/dataset.json`:
 
 
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `benchmarks/tests/test_suite_spreadsheet.py`:
 
@@ -3766,17 +3766,13 @@ def test_evaluate_recalc_failure_fails_cleanly(
 
 
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
-```bash
-cd benchmarks && uv run pytest tests/test_suite_spreadsheet.py -v
-```
-
-Expected: FAIL — `office_bench.suites.spreadsheet` not found.
+Result: `ModuleNotFoundError: No module named 'office_bench.suites.spreadsheet'` — RED confirmed. Commit `908b050`.
 
 
 
-- [ ] **Step 4: Implement `benchmarks/src/office_bench/suites/spreadsheet.py`**
+- [x] **Step 4: Implement `benchmarks/src/office_bench/suites/spreadsheet.py`**
 
 ```python
 """SpreadsheetBench 2 suite adapter — deterministic cell-level comparison."""
@@ -4011,22 +4007,17 @@ class SpreadsheetSuite:
 
 
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
-```bash
-cd benchmarks && uv run pytest tests/test_suite_spreadsheet.py -v
-```
-
-Expected: all 8 tests PASS.
+Result: 21 tests PASS (plan expected 8; implementation added 10 edge-case and coverage tests). Full suite 143/143 PASS. Commit `03a7970`.
 
 
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
-```bash
-git add benchmarks/src/office_bench/suites/spreadsheet.py benchmarks/tests/test_suite_spreadsheet.py benchmarks/tests/fixtures/spreadsheet/
-git commit -m "feat(bench): add SpreadsheetBench 2 deterministic suite adapter"
-```
+Commits:
+- `908b050` — `test(bench): add reproducer for SpreadsheetBench 2 suite adapter (Task 9 RED)`
+- `03a7970` — `feat(bench): add SpreadsheetBench 2 deterministic suite adapter (Task 9 GREEN)`
 
 ---
 
