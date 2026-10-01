@@ -103,19 +103,44 @@ path). No test outcome changes; purely resource hygiene.
 
 ## Coverage and known gaps
 
-- **Coverage:** `office_bench` **100%** (166/166 stmts) via ephemeral
-  `uv run --with pytest-cov` (dev-group unchanged; `pytest-cov` not added
-  to `pyproject.toml`).
+- **Coverage:** `office_bench` **100%** (174/174 stmts after the
+  follow-up fixes below) via ephemeral `uv run --with pytest-cov`
+  (dev-group unchanged; `pytest-cov` not added to `pyproject.toml`).
 - Untested follow-ups (accepted): live end-to-end run of the bridge
   against a real gateway (the wire format is pinned by the capture replay,
   and the full stack incl. workspace binding was probed live in Task 2);
-  the timeout/connection-refused paths share the
+  socket-level timeout/connection-refused share the
   `except requests.RequestException` branch with the tested HTTP-500 path
-  but are not exercised separately; `_consume_stream` breaking on
-  stream EOF without RUN_FINISHED is not separately tested.
+  but are not exercised separately (the wall-clock deadline IS exercised —
+  see follow-up).
 - The mock server always sends the full body then closes; real gateways
   keep the connection open after RUN_FINISHED — the parser `break`s on
   RUN_FINISHED/RUN_ERROR, so this difference is immaterial for the tests.
+
+## Follow-up: code-review fixes (2026-10-01)
+
+Source: `.claude/reviews/task3-agent-bridge-code-review.md` (3 MEDIUM
+findings). Fixed with a second RED/GREEN cycle:
+
+- **RED** — `84e7294` `test(bench): add reproducers for stream deadline and
+  inflight tool-call flush`: **2 failed, 9 passed**. The slow-drip test
+  (50 ms frame gaps, 1.5 s total, `timeout_seconds=0.3`) ran the stream to
+  completion — reproducing the hang; the interrupted-tool-call test got
+  `[]`. The strengthened multi-turn merge asserts passed immediately (pin
+  of existing behavior, resolving the review's tautological-assert
+  finding).
+- **GREEN** — `6caae86` `fix(bench): enforce wall-clock stream deadline and
+  flush in-flight tool calls`: **11/11 bridge tests, 20/20 full suite,
+  coverage 100% (120/120 stmts)**. Changes: monotonic deadline checked
+  per line in `_consume_stream`; in-flight `active_tools` flushed after
+  the loop; duplicated args parsing folded into `_parse_tool_args`;
+  `timeout_seconds` widened `int → float` (recorded deviation — plan
+  specifies `int = 600`; int values remain valid).
+
+| # | What is guaranteed | Test | Type | Result | Evidence |
+|---|---|---|---|---|---|
+| 10 | A slow-drip stream is cut off by the wall-clock deadline with `[ERROR] …timeout…` | `test_run_task_wall_clock_timeout` | unit+integration | PASS | `uv run pytest tests/test_agent_bridge.py -v` |
+| 11 | A tool call interrupted by RUN_ERROR (no TOOL_CALL_END) is still recorded with parsed args | `test_run_task_flushes_inflight_tool_call_on_error` | unit+integration | PASS | same |
 
 ## Merge evidence (if commits get squashed)
 
@@ -124,3 +149,7 @@ path). No test outcome changes; purely resource hygiene.
 - GREEN: `2569ede` — AgentBridge implemented; 6/6 bridge tests, 15/15
   full suite.
 - Harden: `0914d3d` — +3 coverage tests; 18/18, office_bench 100%.
+- Review fixes RED: `84e7294` — 2 reproducers fail (slow-drip hang,
+  dropped tool call); multi-turn pin passes.
+- Review fixes GREEN: `6caae86` — deadline + flush implemented; 11/11
+  bridge tests, 20/20 full suite, 100% coverage.
