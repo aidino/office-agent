@@ -2706,7 +2706,7 @@ OfficeBench's native `evaluation.py`.
 
 
 
-- [ ] **Step 1: Create fixture test data**
+- [x] **Step 1: Create fixture test data**
 
 Create `benchmarks/tests/fixtures/officebench/tasks/1/subtasks/1-1.json`:
 
@@ -2796,7 +2796,7 @@ def evaluate_excel_cell_value(args: dict, workspace_dir: Path) -> bool:
 
 
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `benchmarks/tests/test_suite_officebench.py`:
 
@@ -2899,17 +2899,17 @@ def test_evaluate_contain_fail(suite: OfficeBenchSuite, tmp_path: Path) -> None:
 
 
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_suite_officebench.py -v
 ```
 
-Expected: FAIL — `office_bench.suites.officebench` not found.
+Result: `ModuleNotFoundError: No module named 'office_bench.suites.officebench'` — RED confirmed. Commit `6b5fec1`.
 
 
 
-- [ ] **Step 4: Implement `benchmarks/src/office_bench/suites/officebench.py`**
+- [x] **Step 4: Implement `benchmarks/src/office_bench/suites/officebench.py`**
 
 ```python
 """OfficeBench suite adapter — deterministic evaluation via the benchmark's
@@ -3057,13 +3057,18 @@ class OfficeBenchSuite:
 
 
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_suite_officebench.py -v
 ```
 
-Expected: all 8 tests PASS.
+Result: 14 tests PASS (plan expected 8; implementation added 6 edge-case and review-fix tests). Full suite 110/110 PASS. Commit `b5bf7a7`.
+
+**Code review (2026-10-01):** `.claude/reviews/task7-officebench-suite-review.md` — three findings fixed in `ce9ecfb`:
+- M-1: cached eval module via sentinel pattern (`_eval_module`) to avoid per-task reimport
+- M-2: replaced non-deterministic `hash()` with `id(self)` for importlib module name
+- L-2: added `logging.warning` for malformed/unreadable task JSON in `_parse_subtask`
 
 > **Investigation (after `setup` clones the real submodule):** inspect the
 > real `data/benchmarks/OfficeBench/evaluation.py` — confirm the eval function
@@ -3076,12 +3081,14 @@ Expected: all 8 tests PASS.
 
 
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
-```bash
-git add benchmarks/src/office_bench/suites/officebench.py benchmarks/tests/test_suite_officebench.py benchmarks/tests/fixtures/
-git commit -m "feat(bench): add OfficeBench deterministic suite adapter"
-```
+Commits:
+- `6b5fec1` — `test(bench): add OfficeBench suite adapter reproducer and fixtures`
+- `b5bf7a7` — `feat(bench): add OfficeBench deterministic suite adapter`
+- `edc4cb0` — `docs(bench): mark Task 7 complete, add TDD evidence report`
+- `ce9ecfb` — `fix(bench): cache native eval module, use deterministic module name, log skipped tasks`
+- `6a3fd19` — `docs(bench): record Task 7 code review resolution (approve)`
 
 ---
 
