@@ -1,0 +1,11 @@
+[
+  {
+    "task_id": "debug-001",
+    "instruction": "Fix the SUM formula in cell B5",
+    "category": "Debugging",
+    "spreadsheet_file": "debug-001.xlsx",
+    "expected_cells": {
+      "B5": {"value": "150", "tolerance": 0.01}
+    }
+  }
+]

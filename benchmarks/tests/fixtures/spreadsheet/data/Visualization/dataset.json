@@ -1,0 +1,9 @@
+[
+  {
+    "task_id": "viz-001",
+    "instruction": "Create a chart from the data",
+    "category": "Visualization",
+    "spreadsheet_file": "viz-001.xlsx",
+    "expected_cells": {}
+  }
+]

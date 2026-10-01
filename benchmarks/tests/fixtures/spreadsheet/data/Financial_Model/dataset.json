@@ -1,0 +1,12 @@
+[
+  {
+    "task_id": "fin-001",
+    "instruction": "Build a revenue projection model",
+    "category": "Financial_Model",
+    "spreadsheet_file": "fin-001.xlsx",
+    "expected_cells": {
+      "C3": {"value": "1000"},
+      "C4": {"value": "1100"}
+    }
+  }
+]
