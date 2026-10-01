@@ -1802,7 +1802,7 @@ report.
 
 
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `benchmarks/tests/test_runner.py`:
 
@@ -2034,7 +2034,7 @@ def test_runner_workspace_cleanup(tmp_path: Path) -> None:
 
 
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_runner.py -v
@@ -2044,7 +2044,7 @@ Expected: FAIL — `office_bench.runner` not found.
 
 
 
-- [ ] **Step 3: Implement `benchmarks/src/office_bench/runner.py`**
+- [x] **Step 3: Implement `benchmarks/src/office_bench/runner.py`**
 
 ```python
 """Orchestrator: load → filter → run → evaluate → persist → report."""
@@ -2242,7 +2242,7 @@ class Runner:
 
 
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_runner.py -v
@@ -2252,7 +2252,7 @@ Expected: all 11 tests PASS.
 
 
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add benchmarks/src/office_bench/runner.py benchmarks/tests/test_runner.py

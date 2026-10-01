@@ -127,3 +127,24 @@ Suggested fix: write meta only when `meta.json` is absent, or preserve the origi
 5. Raise the `--run-id` question with the plan before Task 6: without it, resume is unreachable from the CLI.
 
 **Verdict: REQUEST CHANGES** — M-A silently writes permanent junk into the append-only dataset of record on an ordinary operator error, and M-1 persists a wrong-but-plausible aggregate after a mid-write crash; both are small, test-ready fixes in the established TDD style of this repo.
+
+---
+
+## Resolution (2026-10-01)
+
+All four demonstrable findings fixed in a second TDD loop; re-validated
+**62/62 tests, coverage 100%** (`runner.py` 131/131, package 441/441).
+
+| Finding | Resolution | Commit |
+|---------|------------|--------|
+| M-A | Aggregation iterates only registered suites, keyed by `suite.name`; unregistered names print a stderr warning and never reach the CSV. Both triggers covered by tests (typo'd name; registry-key vs `suite.name` divergence). Policy note: a *registered* suite whose filters match zero tasks still records an honest `0 tasks_run` row — that is operator-intended, unlike a typo. | `1a2b1a3` |
+| M-1 | Resume validates result JSON (parses + carries `task_id`, mirroring Task 4's aggregation guard) before skipping; invalid files are unlinked and the task re-runs. Atomic writes in `save_task_result` noted as the root fix — deferred (would touch the Task 4 module; the runner-side guard closes the demonstrable path). | `1a2b1a3` |
+| M-2 | Policy decided: **per-task isolation**, matching the bridge's stated philosophy. `except Exception` per task → stderr warning + persisted failed `TaskResult` (`passed=False`, `judge_backend=None`, explicit crash note) so the aggregate reflects the gap instead of hiding it. Exception-path workspace cleanup pinned by test. | `1a2b1a3` |
+| M-3 | `_resume_meta` preserves the first run's `timestamp`/`git_commit` (consistent with the frozen backdata row) and adds `resumed_at`/`resumed_commit`; unreadable or non-object meta is replaced by fresh meta (tested). | `1a2b1a3` |
+| L-1 | Open — the partial-resume test added in this loop pins runner's path derivation against `save_task_result`'s actual writes, so drift now fails a test rather than silently re-running everything. Shared helper optional. | — |
+| L-2 | Open, deferred with Task 4's L2 to Task 7 (first real suite adapter supplying third-party task ids). | — |
+| L-3 | All carried: (a) partial resume test, (b) exception-path cleanup test, (c) unknown-suite CSV-contents test, (d) result-JSON content pin. | `f381c24`, `1a2b1a3` |
+
+Task 6 flags from Observations carried forward: the planned CLI has no
+`--run-id`, making resume unreachable from the CLI; and `--no-resume`
+semantics (re-run but keep old numbers) deserve explicit help text.
