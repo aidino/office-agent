@@ -1,9 +1,9 @@
 """End-to-end integration test with fake suite and mock bridge."""
 
 from __future__ import annotations
-
 import csv
 import json
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -48,7 +48,7 @@ class IntegrationSuite:
 
 
 def _make_config(
-    *, suites: list[str] = ("integ",), runs: int = 2  # noqa: C408
+    *, suites: Sequence[str] = ("integ",), runs: int = 2
 ) -> RunConfig:
     return RunConfig(
         suites=list(suites),
@@ -121,6 +121,9 @@ def test_full_pipeline(tmp_path: Path) -> None:
     # 7. Bridge was called 6 times (3 tasks × 2 runs)
     assert bridge.run_task.call_count == 6
 
+    # 8. Multi-turn path was never triggered (no turn_prompts in metadata)
+    bridge.run_session.assert_not_called()
+
 
 def test_resume_skips_completed_tasks(tmp_path: Path) -> None:
     bridge = _make_bridge()
@@ -141,3 +144,6 @@ def test_resume_skips_completed_tasks(tmp_path: Path) -> None:
     # And must not append a duplicate backdata row
     with (tmp_path / "backdata.csv").open() as f:
         assert len(list(csv.DictReader(f))) == 1
+
+    # And run_session must never have been called
+    bridge.run_session.assert_not_called()
