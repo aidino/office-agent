@@ -48,6 +48,44 @@ def _build_suite_registry() -> dict:
     return registry
 
 
+def _split_csv(value: str | None) -> list[str] | None:
+    """Split a comma-separated CLI flag: strip whitespace, drop empties.
+
+    ``--task-id "t1, t2"`` or a stray trailing comma must never silently
+    scope a run — a filter matching fewer tasks than intended is recorded
+    permanently in the append-only backdata CSV.
+    """
+    if not value:
+        return None
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
+def _positive_int(value: str) -> int:
+    """argparse type for --runs/--limit: integers >= 1 only.
+
+    ``--runs 0`` is not operator intent — it appends a permanent 0/0 row
+    to the backdata CSV.
+    """
+    try:
+        ivalue = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}")
+    if ivalue < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, got {ivalue}")
+    return ivalue
+
+
+def _result_rows(results: list) -> list[dict]:
+    """Drop stray non-result JSON: anything not a dict carrying a suite.
+
+    ``load_task_results`` ingests any parseable JSON in a run dir, and
+    ``aggregate_suite`` ``.get``s every row — so an operator's notes.json
+    or a snippet file would otherwise crash the reporting commands. One
+    guard here keeps report/compare tolerant of alien files.
+    """
+    return [r for r in results if isinstance(r, dict) and r.get("suite")]
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -66,10 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     # --- run ---
     p_run = sub.add_parser("run", help="Run benchmarks")
     p_run.add_argument("--suite", default="all", help="Comma-separated suite names or 'all'")
-    p_run.add_argument("--runs", type=int, default=1, help="Number of runs per task")
+    p_run.add_argument("--runs", type=_positive_int, default=1, help="Number of runs per task")
     p_run.add_argument("--task-id", default=None, help="Comma-separated task IDs")
     p_run.add_argument("--category", default=None, help="Comma-separated categories")
-    p_run.add_argument("--limit", type=int, default=None, help="Max tasks per suite")
+    p_run.add_argument("--limit", type=_positive_int, default=None, help="Max tasks per suite")
     p_run.add_argument("--keep-workspaces", action="store_true")
     p_run.add_argument(
         "--no-resume",
@@ -121,10 +159,20 @@ def main(argv: list[str] | None = None) -> int:
 def _cmd_setup(_args: argparse.Namespace) -> int:
     """Clone submodules and verify prerequisites."""
     print("Running git submodule update...")
-    subprocess.run(
-        ["git", "submodule", "update", "--init", "--recursive"],
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "submodule", "update", "--init", "--recursive"],
+            check=False,
+        )
+    except OSError as exc:
+        print(f"error: could not run git: {exc}", file=sys.stderr)
+        return 1
+    if result.returncode != 0:
+        print(
+            f"error: git submodule update failed (exit {result.returncode})",
+            file=sys.stderr,
+        )
+        return 1
     print("Setup complete. Verify JUDGE_MODEL / JUDGE_API_KEY env vars.")
     return 0
 
@@ -154,14 +202,41 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     if args.suite == "all":
         suite_names = list(registry.keys())
+        if not suite_names:
+            print(
+                "error: no suite adapters available — nothing to run",
+                file=sys.stderr,
+            )
+            return 1
     else:
-        suite_names = [s.strip() for s in args.suite.split(",")]
+        suite_names = _split_csv(args.suite) or []
+        if not suite_names:
+            print(
+                f"error: --suite contains no valid names: {args.suite!r}",
+                file=sys.stderr,
+            )
+            return 1
+
+    task_ids = _split_csv(args.task_id)
+    if args.task_id and not task_ids:
+        print(
+            f"error: --task-id contains no valid ids: {args.task_id!r}",
+            file=sys.stderr,
+        )
+        return 1
+    categories = _split_csv(args.category)
+    if args.category and not categories:
+        print(
+            f"error: --category contains no valid names: {args.category!r}",
+            file=sys.stderr,
+        )
+        return 1
 
     config = RunConfig(
         suites=suite_names,
         runs=args.runs,
-        task_ids=args.task_id.split(",") if args.task_id else None,
-        categories=args.category.split(",") if args.category else None,
+        task_ids=task_ids,
+        categories=categories,
         limit=args.limit,
         keep_workspaces=args.keep_workspaces,
         no_resume=args.no_resume,
@@ -184,7 +259,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
         print(f"Run not found: {run_dir}", file=sys.stderr)
         return 1
 
-    results = load_task_results(run_dir)
+    results = _result_rows(load_task_results(run_dir))
     suites = {r["suite"] for r in results}
     aggregated = {s: aggregate_suite(results, s) for s in suites}
     path = generate_report(run_dir, aggregated, REFERENCE_SCORES)
@@ -214,6 +289,8 @@ def _cmd_trend(args: argparse.Namespace) -> int:
     recent = rows[-10:]
     print(f"{'Run ID':<24} {'Suite':<15} {'Metric':<12} {'Score':<8} {'Tasks'}")
     print("-" * 70)
+    if len(rows) > len(recent):
+        print(f"(showing {len(recent)} most recent of {len(rows)} rows)")
     for r in recent:
         print(
             f"{r.get('run_id', ''):<24} "
@@ -238,8 +315,8 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         print(f"Run not found: {id2}", file=sys.stderr)
         return 1
 
-    results1 = load_task_results(dir1)
-    results2 = load_task_results(dir2)
+    results1 = _result_rows(load_task_results(dir1))
+    results2 = _result_rows(load_task_results(dir2))
     suites1 = {r["suite"] for r in results1}
     suites2 = {r["suite"] for r in results2}
     all_suites = sorted(suites1 | suites2)
@@ -253,7 +330,15 @@ def _cmd_compare(args: argparse.Namespace) -> int:
         metric = agg1.get(s, {}).get("primary_metric", agg2.get(s, {}).get("primary_metric", ""))
         v1 = agg1.get(s, {}).get("primary_value", 0)
         v2 = agg2.get(s, {}).get("primary_value", 0)
+        in1, in2 = s in suites1, s in suites2
+        col1 = f"{v1:.2f}" if in1 else "not run"
+        col2 = f"{v2:.2f}" if in2 else "not run"
+        if not (in1 and in2):
+            # Absent from one side: no delta — a fabricated one would read
+            # as a regression or improvement that never happened.
+            print(f"{s:<15} {metric:<12} {col1:<12} {col2:<12} {'—':<8}")
+            continue
         delta = v2 - v1
         status = "⚠️" if delta < -2.0 else "✅" if delta >= 0 else "→"
-        print(f"{s:<15} {metric:<12} {v1:<12.2f} {v2:<12.2f} {delta:<+8.2f} {status}")
+        print(f"{s:<15} {metric:<12} {col1:<12} {col2:<12} {delta:<+8.2f} {status}")
     return 0

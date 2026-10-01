@@ -439,15 +439,16 @@ def test_run_suite_flag_strips_whitespace(tmp_path: Path) -> None:
 def test_run_rejects_degenerate_filter_flags(capsys, tmp_path: Path) -> None:
     """M-2 (R2c): a filter flag with no valid ids must fail loudly, not
     run zero tasks and append a permanent 0/0 backdata row."""
-    with (
-        patch("office_bench.cli._build_suite_registry", return_value={"fakesuite": FakeSuite()}),
-        patch("office_bench.cli.Runner") as mock_runner_cls,
-        patch("office_bench.cli.RESULTS_BASE", tmp_path),
-    ):
-        ret = main(["run", "--suite", "fakesuite", "--task-id", ","])
-    assert ret == 1
-    assert "task-id" in capsys.readouterr().err.lower()
-    mock_runner_cls.assert_not_called()
+    for flag in ("--task-id", "--category"):
+        with (
+            patch("office_bench.cli._build_suite_registry", return_value={"fakesuite": FakeSuite()}),
+            patch("office_bench.cli.Runner") as mock_runner_cls,
+            patch("office_bench.cli.RESULTS_BASE", tmp_path),
+        ):
+            ret = main(["run", "--suite", "fakesuite", flag, ","])
+        assert ret == 1
+        assert flag.lstrip("-") in capsys.readouterr().err.lower()
+        mock_runner_cls.assert_not_called()
 
 
 def test_run_suite_all_with_empty_registry_fails(capsys, tmp_path: Path) -> None:
