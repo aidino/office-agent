@@ -4,6 +4,12 @@
 **Range**: `a2e22a8..HEAD` (commits `c86cf99`, `b6508f3`, `2bbaab7`, `a52b307`)
 **Decision**: **APPROVE with comments** (0 critical, 0 high, 2 medium, 3 low; validation passes)
 
+> **Resolution (2026-10-01, same day):** M1 and M2 are **FIXED** via a
+> small TDD loop — RED reproducers in commit `17d038b`, minimal fix in
+> commit `d7f86ff`. Re-validated: 39/39 tests, 100% package coverage.
+> LOW findings L1–L3 remain open by design (cosmetic / deferred to the
+> suite-adapter tasks); see "Recommended next steps".
+
 ## Summary
 
 Clean, well-tested persistence layer that matches the plan interface and the

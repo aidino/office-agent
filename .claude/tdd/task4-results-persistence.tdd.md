@@ -130,3 +130,25 @@ Checkpoint commits preserved on `main` (not squashed):
 
 If these are ever squashed, the RED/GREEN/coverage summary above is the
 record of what was verified and how.
+
+## Post-review fix loop (2026-10-01)
+
+Code review (`.claude/reviews/task4-results-persistence-review.md`)
+confirmed two defensive-gap findings with live reproducers; both were
+fixed in a second small TDD loop:
+
+- **RED** — `17d038b` `test(bench): add reproducers for review findings M1/M2 in results layer`
+  - M1: `test_generate_report_survives_corrupt_meta_json` — truncated
+    meta.json → failed with `JSONDecodeError`.
+  - M2: `test_aggregate_forte_skips_rows_missing_task_id` — stray row
+    without `task_id` → failed with `KeyError: 'task_id'`.
+- **GREEN** — `d7f86ff` `fix(bench): survive corrupt meta.json and task_id-less rows in results layer`
+  - `generate_report` guards the meta.json read and emits an explicit
+    "meta.json unreadable" note; per-task results stay reportable.
+  - `_aggregate_forte` skips rows without `task_id`; `result_rows`
+    counts only ingested rows.
+  - Re-validated: **39/39 tests**, package coverage still **100%**
+    (`results.py` 134/134 stmts).
+- LOW findings (L1 empty section heading, L2 task_id sanitization,
+  L3 CSV formula injection) were left open intentionally — see the
+  review's next steps; L2 is to be revisited with Task 7.
