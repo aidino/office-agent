@@ -499,7 +499,7 @@ worker threads; the wrapper restores the previous value afterwards.
 
 
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `office_agent/tests/test_workspace_binding.py`:
 
@@ -588,7 +588,7 @@ def test_restores_previous_value(monkeypatch, tmp_path) -> None:
 
 
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd office_agent && uv run pytest tests/test_workspace_binding.py -v
@@ -598,7 +598,7 @@ Expected: FAIL — `ImportError: cannot import name 'WorkspaceScopedRunnable'`.
 
 
 
-- [ ] **Step 3: Implement the wrapper in `office_agent/src/office_agent/binding.py`**
+- [x] **Step 3: Implement the wrapper in `office_agent/src/office_agent/binding.py`**
 
 Add the imports and the proxy class, then wrap the agent in `build_spec()`:
 
@@ -661,7 +661,7 @@ def build_spec():
 
 
 
-- [ ] **Step 4: Run all office_agent tests**
+- [x] **Step 4: Run all office_agent tests**
 
 ```bash
 cd office_agent && uv run pytest tests/ -v
@@ -671,7 +671,7 @@ Expected: all tests PASS — including the existing `test_binding.py` and `test_
 
 
 
-- [ ] **Step 5: Manual end-to-end verification against the live gateway**
+- [x] **Step 5: Manual end-to-end verification against the live gateway**
 
 ```bash
 mkdir -p /tmp/bench_probe && touch /tmp/bench_probe/marker.txt
@@ -688,7 +688,7 @@ works end to end (tools confined to `/tmp/bench_probe`, not the gateway CWD).
 
 
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add office_agent/src/office_agent/binding.py office_agent/tests/test_workspace_binding.py
