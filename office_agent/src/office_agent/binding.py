@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
 from typing import Any
 
 from agentseek_langchain import messages_spec
@@ -14,7 +16,7 @@ from deepagents import (
 )
 
 from .settings import get_settings
-from .tools import OFFICE_TOOLS
+from .tools import OFFICE_TOOLS, WORKSPACE_ENV
 
 SYSTEM_PROMPT = """\
 You are Office Agent, a backend assistant for everyday office work with
@@ -68,7 +70,50 @@ def build_agent() -> Any:
     )
 
 
+class WorkspaceScopedRunnable:
+    """Export the per-request workspace into OFFICE_AGENT_WORKSPACE.
+
+    agentseek's ``default_runnable_config`` puts the per-request workspace
+    (from the AG-UI ``state._runtime_workspace``) into
+    ``config["metadata"]["workspace"]``. The office tools read the env var at
+    call time, so export it for the duration of one invocation and restore
+    the previous value afterwards. Process-global env is safe here: benchmark
+    runs are sequential against a single-instance gateway.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    async def ainvoke(self, runnable_input: Any, /, **kwargs: Any) -> Any:
+        with self._scoped_workspace(kwargs.get("config")):
+            return await self._inner.ainvoke(runnable_input, **kwargs)
+
+    def invoke(self, runnable_input: Any, /, **kwargs: Any) -> Any:
+        with self._scoped_workspace(kwargs.get("config")):
+            return self._inner.invoke(runnable_input, **kwargs)
+
+    @staticmethod
+    @contextmanager
+    def _scoped_workspace(config: Any):
+        metadata = (config or {}).get("metadata") or {}
+        workspace = metadata.get("workspace")
+        if not isinstance(workspace, str) or not workspace:
+            yield
+            return
+        previous = os.environ.get(WORKSPACE_ENV)
+        os.environ[WORKSPACE_ENV] = workspace
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop(WORKSPACE_ENV, None)
+            else:
+                os.environ[WORKSPACE_ENV] = previous
+
+
 def build_spec():
     """Return a RunnableSpec for AGENTSEEK_LANGCHAIN_SPEC."""
 
-    return messages_spec(build_agent(), include_agents_md=True)
+    return messages_spec(
+        WorkspaceScopedRunnable(build_agent()), include_agents_md=True
+    )
