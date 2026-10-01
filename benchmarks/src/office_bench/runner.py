@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 from dataclasses import dataclass
@@ -22,7 +24,7 @@ from office_bench.results import (
     save_run_meta,
     save_task_result,
 )
-from office_bench.suites.base import Suite, Task
+from office_bench.suites.base import AgentOutput, Suite, Task, TaskResult
 
 
 @dataclass(frozen=True)
@@ -66,35 +68,47 @@ class Runner:
         run_dir.mkdir(parents=True, exist_ok=True)
 
         # Save meta
-        meta = {
-            "run_id": run_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "git_commit": self._git_commit(),
-            "agent_version": self._agent_version(),
-            "model": os.environ.get("BUB_MODEL", "deepseek-flash"),
-            "suites": self._config.suites,
-            "runs": self._config.runs,
-        }
+        meta = self._resume_meta(
+            run_dir,
+            {
+                "run_id": run_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "git_commit": self._git_commit(),
+                "agent_version": self._agent_version(),
+                "model": os.environ.get("BUB_MODEL", "deepseek-flash"),
+                "suites": self._config.suites,
+                "runs": self._config.runs,
+            },
+        )
         save_run_meta(run_dir, meta)
 
-        # Run each suite
+        # Run each suite. Unregistered names are warned about and skipped —
+        # they must never reach aggregation, or a typo would append a
+        # permanent 0/0 "n/a" row to the append-only backdata CSV.
+        executed: list[Suite] = []
         for suite_name in self._config.suites:
             suite = self._suites.get(suite_name)
             if suite is None:
+                print(
+                    f"warning: suite '{suite_name}' not registered — skipped",
+                    file=sys.stderr,
+                )
                 continue
+            executed.append(suite)
             self._run_suite(suite, run_dir)
 
-        # Aggregate and report
+        # Aggregate and report — keyed by suite.name, the name results are
+        # persisted under (which may differ from the registry key).
         all_results = load_task_results(run_dir)
         aggregated: dict[str, dict] = {}
-        for suite_name in self._config.suites:
-            agg = aggregate_suite(all_results, suite_name)
-            aggregated[suite_name] = agg
+        for suite in executed:
+            agg = aggregate_suite(all_results, suite.name)
+            aggregated[suite.name] = agg
 
             # Append backdata row — idempotent on resume: never write a
             # second row for the same (run_id, suite) in the append-only CSV
             backdata_path = results_base / "backdata.csv"
-            if not has_backdata_row(backdata_path, run_id, suite_name):
+            if not has_backdata_row(backdata_path, run_id, suite.name):
                 append_backdata(
                     backdata_path,
                     {
@@ -103,7 +117,7 @@ class Runner:
                         "git_commit": meta["git_commit"],
                         "agent_version": meta["agent_version"],
                         "model": meta["model"],
-                        "suite": suite_name,
+                        "suite": suite.name,
                         "tasks_total": agg.get("tasks_total", 0),
                         "tasks_run": agg.get("tasks_run", 0),
                         "primary_metric": agg.get("primary_metric", ""),
@@ -115,8 +129,36 @@ class Runner:
         generate_report(run_dir, aggregated, REFERENCE_SCORES)
         return run_dir
 
+    @staticmethod
+    def _resume_meta(run_dir: Path, fresh: dict) -> dict:
+        """Merge run metadata on resume, preserving first-run provenance.
+
+        The backdata row for an existing (run_id, suite) is frozen at the
+        first run's timestamp/commit; overwriting meta.json with the
+        resuming invocation's values would make the two records disagree.
+        A previous meta that is missing or unreadable is replaced by the
+        fresh one.
+        """
+        meta_path = run_dir / "meta.json"
+        if not meta_path.exists():
+            return fresh
+        try:
+            previous = json.loads(meta_path.read_text())
+            if not isinstance(previous, dict):
+                raise ValueError("meta.json is not an object")
+        except (json.JSONDecodeError, OSError, ValueError):
+            return fresh
+        previous["resumed_at"] = fresh["timestamp"]
+        previous["resumed_commit"] = fresh["git_commit"]
+        return previous
+
     def _run_suite(self, suite: Suite, run_dir: Path) -> None:
-        """Load, filter, and run all tasks for one suite."""
+        """Load, filter, and run all tasks for one suite.
+
+        One crashing task (setup, bridge call, or evaluate) is isolated:
+        it is recorded as a failed result and the run continues — the same
+        philosophy the bridge applies to gateway errors one layer down.
+        """
         tasks = suite.load_tasks()
         tasks = self._filter_tasks(tasks)
 
@@ -125,26 +167,68 @@ class Runner:
                 result_path = (
                     run_dir / suite.name / f"{task.task_id}_run{run_num}.json"
                 )
-                if result_path.exists() and not self._config.no_resume:
+                if (
+                    result_path.exists()
+                    and not self._config.no_resume
+                    and self._is_complete_result(result_path)
+                ):
                     continue  # resume: skip completed
+                if result_path.exists():
+                    # Crash-truncated garbage — replace, never skip.
+                    result_path.unlink()
 
                 workspace = Path(tempfile.mkdtemp(prefix=f"bench_{task.task_id}_"))
+                agent_output = AgentOutput(
+                    messages=[], files_created=[], tool_calls=[],
+                    duration_seconds=0.0,
+                )
                 try:
-                    suite.setup_workspace(task, workspace)
-                    turn_prompts = task.metadata.get("turn_prompts")
-                    if isinstance(turn_prompts, list) and len(turn_prompts) > 1:
-                        # Multi-turn session (e.g. PPTC): same thread, all turns
-                        agent_output = self._bridge.run_session(
-                            list(turn_prompts), workspace
-                        )
-                    else:
-                        prompt = suite.format_prompt(task)
-                        agent_output = self._bridge.run_task(prompt, workspace)
-                    result = suite.evaluate(task, workspace, agent_output)
-                    save_task_result(run_dir, result, run_num, agent_output)
-                finally:
-                    if not self._config.keep_workspaces:
-                        shutil.rmtree(workspace, ignore_errors=True)
+                    try:
+                        suite.setup_workspace(task, workspace)
+                        turn_prompts = task.metadata.get("turn_prompts")
+                        if isinstance(turn_prompts, list) and len(turn_prompts) > 1:
+                            # Multi-turn session (e.g. PPTC): same thread, all turns
+                            agent_output = self._bridge.run_session(
+                                list(turn_prompts), workspace
+                            )
+                        else:
+                            prompt = suite.format_prompt(task)
+                            agent_output = self._bridge.run_task(prompt, workspace)
+                        result = suite.evaluate(task, workspace, agent_output)
+                    finally:
+                        if not self._config.keep_workspaces:
+                            shutil.rmtree(workspace, ignore_errors=True)
+                except Exception as exc:  # noqa: BLE001 — isolate one task
+                    print(
+                        f"warning: task {suite.name}/{task.task_id} "
+                        f"run {run_num} crashed: {exc!r} — recorded as failed",
+                        file=sys.stderr,
+                    )
+                    result = TaskResult(
+                        task_id=task.task_id,
+                        suite=suite.name,
+                        passed=False,
+                        score=0.0,
+                        breakdown={},
+                        notes=f"runner: task crashed: {exc!r}",
+                        judge_backend=None,
+                    )
+                save_task_result(run_dir, result, run_num, agent_output)
+
+    @staticmethod
+    def _is_complete_result(path: Path) -> bool:
+        """True only if a result file parses and carries a task_id.
+
+        Bare existence is not completion: a crash mid-write leaves a
+        truncated file that aggregation (Task 4) already drops — skipping
+        it on resume would silently lose the task from the run. Mirrors
+        the task_id guard Task 4 added to ``_aggregate_forte``.
+        """
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return False
+        return isinstance(data, dict) and bool(data.get("task_id"))
 
     def _filter_tasks(self, tasks: list[Task]) -> list[Task]:
         """Apply task_ids, categories, and limit filters."""

@@ -296,7 +296,9 @@ def test_runner_unknown_suite_never_pollutes_backdata(
 
     # The operator gets a signal instead of silence
     assert "not-registered" in capsys.readouterr().err
-    assert "not-registered" not in (run_dir / "report.md").read_text()
+    # No results-table row for the typo (meta may truthfully mention it)
+    report = (run_dir / "report.md").read_text()
+    assert "| not-registered" not in report
 
 
 def test_runner_aggregates_by_suite_name_not_registry_key(
@@ -429,6 +431,16 @@ def test_runner_resume_replaces_corrupt_meta(tmp_path: Path) -> None:
 
     meta = json.loads((run_dir / "meta.json").read_text())
     assert meta["run_id"] == "R"
+
+    # Same for valid JSON that is not an object (e.g. a stray list)
+    run_dir2 = tmp_path / "R2"
+    run_dir2.mkdir()
+    (run_dir2 / "meta.json").write_text("[]")
+    Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=_make_mock_bridge()
+    ).run(tmp_path, run_id="R2")
+    meta2 = json.loads((run_dir2 / "meta.json").read_text())
+    assert meta2["run_id"] == "R2"
 
 
 def test_runner_partial_resume_completes_remainder(tmp_path: Path) -> None:
