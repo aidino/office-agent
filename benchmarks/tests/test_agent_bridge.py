@@ -201,6 +201,67 @@ def test_parses_live_gateway_capture(sse_server, tmp_path: Path) -> None:
     assert output.tool_calls == []
 
 
+def test_run_task_skips_malformed_sse_frames(sse_server, tmp_path: Path) -> None:
+    """A corrupt data: frame must be skipped, not crash the run."""
+    SSEHandler.sse_body = (
+        'data: {"type":"RUN_STARTED","threadId":"t1","runId":"r9"}\n\n'
+        "data: {not valid json\n\n"
+        'data: {"type":"TEXT_MESSAGE_START","messageId":"a1","role":"assistant"}\n\n'
+        'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"a1","delta":"Still alive"}\n\n'
+        'data: {"type":"TEXT_MESSAGE_END","messageId":"a1"}\n\n'
+        'data: {"type":"RUN_FINISHED","threadId":"t1","runId":"r9"}\n\n'
+    )
+    port = sse_server.server_address[1]
+    bridge = AgentBridge(
+        gateway_url=f"http://127.0.0.1:{port}/agent",
+        timeout_seconds=30,
+    )
+    output = bridge.run_task("Garbage frame", tmp_path)
+    assert output.messages == [{"role": "assistant", "content": "Still alive"}]
+
+
+def test_run_task_tool_call_args_unparseable_kept_raw(
+    sse_server, tmp_path: Path
+) -> None:
+    """Tool-call args that are not valid JSON are kept verbatim, not dropped."""
+    run_id = uuid.uuid4().hex[:8]
+    SSEHandler.sse_body = "".join([
+        _sse_line("RUN_STARTED", {"threadId": "t1", "runId": run_id}),
+        _sse_line(
+            "TOOL_CALL_START",
+            {"toolCallId": "tc9", "toolCallName": "write_spreadsheet"},
+        ),
+        _sse_line(
+            "TOOL_CALL_ARGS", {"toolCallId": "tc9", "delta": "{not json}"},
+        ),
+        _sse_line("TOOL_CALL_END", {"toolCallId": "tc9"}),
+        _sse_line("RUN_FINISHED", {"threadId": "t1", "runId": run_id}),
+    ])
+    port = sse_server.server_address[1]
+    bridge = AgentBridge(
+        gateway_url=f"http://127.0.0.1:{port}/agent",
+        timeout_seconds=30,
+    )
+    output = bridge.run_task("Raw args", tmp_path)
+    assert output.tool_calls == [
+        {"name": "write_spreadsheet", "args": {"raw": "{not json}"}}
+    ]
+
+
+def test_run_task_workspace_missing_yields_no_files(
+    sse_server, tmp_path: Path
+) -> None:
+    """A workspace dir that never existed snapshots as empty, not an error."""
+    port = sse_server.server_address[1]
+    bridge = AgentBridge(
+        gateway_url=f"http://127.0.0.1:{port}/agent",
+        timeout_seconds=30,
+    )
+    output = bridge.run_task("Hi", tmp_path / "does-not-exist")
+    assert output.files_created == []
+    assert len(output.messages) == 1
+
+
 def test_run_session_multi_turn(sse_server, tmp_path: Path) -> None:
     port = sse_server.server_address[1]
     bridge = AgentBridge(
