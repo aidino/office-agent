@@ -735,7 +735,7 @@ contract test replaying a live capture.
 
 
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `benchmarks/tests/test_agent_bridge.py`:
 
@@ -973,7 +973,7 @@ def test_run_session_multi_turn(sse_server, tmp_path: Path) -> None:
 
 
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_agent_bridge.py -v
@@ -983,7 +983,7 @@ Expected: FAIL — `office_bench.agent_bridge` not found.
 
 
 
-- [ ] **Step 3: Implement `benchmarks/src/office_bench/agent_bridge.py`**
+- [x] **Step 3: Implement `benchmarks/src/office_bench/agent_bridge.py`**
 
 ```python
 """AG-UI SSE client that bridges the benchmark harness to Office Agent."""
@@ -1214,7 +1214,7 @@ class AgentBridge:
 
 
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_agent_bridge.py -v
@@ -1224,7 +1224,7 @@ Expected: all 6 tests PASS.
 
 
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add benchmarks/src/office_bench/agent_bridge.py benchmarks/tests/test_agent_bridge.py
