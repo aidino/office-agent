@@ -217,3 +217,75 @@ def test_backdata_row_columns() -> None:
         "secondary_metrics",
     }
     assert set(BackdataRow.__annotations__) == expected
+
+
+def test_load_task_results_skips_meta_json(run_dir: Path) -> None:
+    """meta.json lives in the same run_dir — it must never count as a result."""
+    save_run_meta(run_dir, {"model": "deepseek-flash"})
+    save_task_result(
+        run_dir, _make_result("t1", "officebench", True, 1.0), 1, _make_output()
+    )
+    results = load_task_results(run_dir)
+    assert len(results) == 1
+    assert results[0]["task_id"] == "t1"
+
+
+def test_aggregate_suite_empty_results() -> None:
+    agg = aggregate_suite([], "forte")
+    assert agg["primary_metric"] == "n/a"
+    assert agg["primary_value"] == 0.0
+    assert agg["tasks_run"] == 0
+    assert agg["tasks_total"] == 0
+
+
+def test_generate_report_includes_run_metadata(run_dir: Path) -> None:
+    save_run_meta(run_dir, {"model": "deepseek-flash", "runs": 3})
+    aggregated = {
+        "officebench": {
+            "primary_metric": "accuracy",
+            "primary_value": 100.0,
+            "tasks_run": 1,
+            "tasks_total": 1,
+        },
+        # Suite with no published reference — must be skipped, not crash
+        "integ": {
+            "primary_metric": "accuracy",
+            "primary_value": 50.0,
+            "tasks_run": 2,
+            "tasks_total": 2,
+        },
+    }
+    path = generate_report(run_dir, aggregated, REFERENCE_SCORES)
+    content = path.read_text()
+    assert "Run Metadata" in content
+    assert "deepseek-flash" in content
+    # Reference comparison table must render our score against published ones
+    assert "Office Agent" in content
+    assert "gpt-4o" in content
+    # The referenceless suite appears in the results table but gets no
+    # reference section
+    assert "### integ" not in content
+
+
+def test_load_task_results_ignores_corrupt_json(run_dir: Path) -> None:
+    """A half-written JSON (crash mid-save) must be skipped, not raise."""
+    (run_dir / "broken_run1.json").write_text('{"task_id": "trunca')
+    save_task_result(
+        run_dir, _make_result("t1", "officebench", True, 1.0), 1, _make_output()
+    )
+    results = load_task_results(run_dir)
+    assert len(results) == 1
+    assert results[0]["task_id"] == "t1"
+
+
+def test_aggregate_suite_metric_names() -> None:
+    assert aggregate_suite(
+        [{"suite": "spreadsheet", "passed": True, "score": 1.0}], "spreadsheet"
+    )["primary_metric"] == "pass_at_1"
+    assert aggregate_suite(
+        [{"suite": "pptc", "passed": False, "score": 0.0}], "pptc"
+    )["primary_metric"] == "session_acc"
+    # Unknown suites fall back to plain accuracy
+    assert aggregate_suite(
+        [{"suite": "integ", "passed": True, "score": 1.0}], "integ"
+    )["primary_metric"] == "accuracy"
