@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -157,10 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     return handler(args)
 
 
-def _cmd_setup(_args: argparse.Namespace) -> int:
-    """Clone submodules, download datasets, and verify prerequisites."""
-
-    # Step 1/6: Git submodules
+def _setup_submodules() -> bool:
+    """Step 1/6: clone/update git submodules. Return True on success."""
     print("Step 1/6: Updating git submodules...")
     try:
         result = subprocess.run(
@@ -169,15 +168,18 @@ def _cmd_setup(_args: argparse.Namespace) -> int:
         )
     except OSError as exc:
         print(f"error: could not run git: {exc}", file=sys.stderr)
-        return 1
+        return False
     if result.returncode != 0:
         print(
             f"error: git submodule update failed (exit {result.returncode})",
             file=sys.stderr,
         )
-        return 1
+        return False
+    return True
 
-    # Step 2/6: SpreadsheetBench 2 dataset from HuggingFace
+
+def _setup_check_dataset() -> None:
+    """Step 2/6: check SpreadsheetBench 2 HuggingFace dataset."""
     print("Step 2/6: Checking SpreadsheetBench 2 dataset...")
     dataset_dir = DATA_BASE / "datasets" / "spreadsheet"
     if not dataset_dir.exists():
@@ -189,7 +191,9 @@ def _cmd_setup(_args: argparse.Namespace) -> int:
     else:
         print("  → Dataset already present.")
 
-    # Step 3/6: PPTC label files
+
+def _setup_check_pptc() -> None:
+    """Step 3/6: check PPTC label files."""
     print("Step 3/6: Checking PPTC label files...")
     pptc_dir = DATA_BASE / "PPTC"
     if pptc_dir.exists():
@@ -204,17 +208,18 @@ def _cmd_setup(_args: argparse.Namespace) -> int:
     else:
         print("  → PPTC submodule not cloned yet.")
 
-    # Step 4/6: LibreOffice
+
+def _setup_check_libreoffice() -> None:
+    """Step 4/6: check LibreOffice availability."""
     print("Step 4/6: Checking LibreOffice...")
-    lo_result = subprocess.run(
-        ["which", "libreoffice"], capture_output=True, text=True,
-    )
-    if lo_result.returncode != 0:
+    if shutil.which("libreoffice") is None:
         print("  ⚠️  LibreOffice not found. Required for SpreadsheetBench 2 recalc.")
     else:
         print("  → LibreOffice found.")
 
-    # Step 5/6: FORTE judge module
+
+def _setup_check_forte() -> None:
+    """Step 5/6: check FORTE judge module directory."""
     print("Step 5/6: Checking FORTE judge module...")
     forte_judge = DATA_BASE / "FORTE" / "judge"
     if forte_judge.exists():
@@ -222,7 +227,9 @@ def _cmd_setup(_args: argparse.Namespace) -> int:
     else:
         print("  → FORTE submodule not ready. Judge won't work until cloned.")
 
-    # Step 6/6: API keys
+
+def _setup_check_api_keys() -> None:
+    """Step 6/6: check judge API keys."""
     print("Step 6/6: Checking API keys...")
     api_key = os.environ.get("JUDGE_API_KEY") or os.environ.get("BUB_API_KEY", "")
     if api_key:
@@ -233,6 +240,16 @@ def _cmd_setup(_args: argparse.Namespace) -> int:
             " LLM judge won't work."
         )
 
+
+def _cmd_setup(_args: argparse.Namespace) -> int:
+    """Clone submodules, download datasets, and verify prerequisites."""
+    if not _setup_submodules():
+        return 1
+    _setup_check_dataset()
+    _setup_check_pptc()
+    _setup_check_libreoffice()
+    _setup_check_forte()
+    _setup_check_api_keys()
     print("\nSetup complete.")
     return 0
 

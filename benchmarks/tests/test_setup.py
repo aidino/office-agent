@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import os
-from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -28,50 +26,6 @@ def test_setup_runs_submodule_update() -> None:
     assert any(
         "submodule" in str(c) for c in calls
     ), f"Expected git submodule call, got: {calls}"
-
-
-# --- Step 4: LibreOffice check ---
-
-
-def test_setup_checks_libreoffice() -> None:
-    with patch("office_bench.cli.subprocess") as mock_sub:
-        mock_sub.run.return_value = MagicMock(returncode=0)
-        with patch("builtins.print") as mock_print:
-            _cmd_setup(_ns())
-
-    printed = " ".join(str(c) for c in mock_print.call_args_list)
-    assert "LibreOffice" in printed or "libreoffice" in printed.lower()
-
-
-# --- Step 6: API key warnings ---
-
-
-def test_setup_warns_missing_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("BUB_API_KEY", raising=False)
-    monkeypatch.delenv("JUDGE_API_KEY", raising=False)
-
-    with patch("office_bench.cli.subprocess") as mock_sub:
-        mock_sub.run.return_value = MagicMock(returncode=0)
-        with patch("builtins.print") as mock_print:
-            _cmd_setup(_ns())
-
-    printed = " ".join(str(c) for c in mock_print.call_args_list)
-    assert "API" in printed or "key" in printed.lower() or "JUDGE" in printed
-
-
-def test_setup_acknowledges_present_api_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("JUDGE_API_KEY", "sk-test")
-
-    with patch("office_bench.cli.subprocess") as mock_sub:
-        mock_sub.run.return_value = MagicMock(returncode=0)
-        with patch("builtins.print") as mock_print:
-            _cmd_setup(_ns())
-
-    printed = " ".join(str(c) for c in mock_print.call_args_list)
-    # Should not warn — key is present
-    assert "JUDGE_API_KEY" in printed or "set" in printed.lower()
 
 
 # --- Step 2: SpreadsheetBench dataset check ---
@@ -102,6 +56,19 @@ def test_setup_mentions_pptc_labels() -> None:
     assert "PPTC" in printed, f"Should mention PPTC labels, got: {printed}"
 
 
+# --- Step 4: LibreOffice check ---
+
+
+def test_setup_checks_libreoffice() -> None:
+    with patch("office_bench.cli.subprocess") as mock_sub:
+        mock_sub.run.return_value = MagicMock(returncode=0)
+        with patch("builtins.print") as mock_print:
+            _cmd_setup(_ns())
+
+    printed = " ".join(str(c) for c in mock_print.call_args_list)
+    assert "LibreOffice" in printed or "libreoffice" in printed.lower()
+
+
 # --- Step 5: FORTE judge check ---
 
 
@@ -113,6 +80,38 @@ def test_setup_mentions_forte_judge() -> None:
 
     printed = " ".join(str(c) for c in mock_print.call_args_list)
     assert "FORTE" in printed, f"Should mention FORTE judge, got: {printed}"
+
+
+# --- Step 6: API key warnings ---
+
+
+def test_setup_warns_missing_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BUB_API_KEY", raising=False)
+    monkeypatch.delenv("JUDGE_API_KEY", raising=False)
+
+    with patch("office_bench.cli.subprocess") as mock_sub:
+        mock_sub.run.return_value = MagicMock(returncode=0)
+        with patch("builtins.print") as mock_print:
+            _cmd_setup(_ns())
+
+    printed = " ".join(str(c) for c in mock_print.call_args_list)
+    assert "JUDGE_API_KEY" in printed or "BUB_API_KEY" in printed
+
+
+def test_setup_acknowledges_present_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("JUDGE_API_KEY", "sk-test")
+
+    with patch("office_bench.cli.subprocess") as mock_sub:
+        mock_sub.run.return_value = MagicMock(returncode=0)
+        with patch("builtins.print") as mock_print:
+            _cmd_setup(_ns())
+
+    printed = " ".join(str(c) for c in mock_print.call_args_list)
+    # Should confirm key is found — not emit the warning
+    warning = "Neither JUDGE_API_KEY nor BUB_API_KEY is set"
+    assert warning not in printed, f"Should not warn when key is set: {printed}"
 
 
 # --- Step ordering: all 6 steps ---

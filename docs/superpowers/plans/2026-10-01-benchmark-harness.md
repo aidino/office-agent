@@ -4826,7 +4826,7 @@ Add `.gitmodules` entries.
 
 
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `benchmarks/tests/test_setup.py`:
 
@@ -4870,7 +4870,7 @@ def test_setup_checks_api_key(monkeypatch) -> None:
 
 
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_setup.py -v
@@ -4880,7 +4880,7 @@ Expected: FAIL or PASS depending on current `_cmd_setup` — if it works with th
 
 
 
-- [ ] **Step 3: Enhance `_cmd_setup()` in `benchmarks/src/office_bench/cli.py`**
+- [x] **Step 3: Enhance `_cmd_setup()` in `benchmarks/src/office_bench/cli.py`**
 
 Replace the existing `_cmd_setup` function:
 
@@ -4948,7 +4948,7 @@ def _cmd_setup() -> int:
 
 
 
-- [ ] **Step 4: Create `.gitmodules`**
+- [x] **Step 4: Create `.gitmodules`**
 
 ```ini
 [submodule "data/benchmarks/FORTE"]
@@ -4970,7 +4970,7 @@ def _cmd_setup() -> int:
 
 
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [x] **Step 5: Run tests to verify they pass**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_setup.py -v
@@ -4980,7 +4980,7 @@ Expected: all 2 tests PASS.
 
 
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .gitmodules benchmarks/src/office_bench/cli.py benchmarks/tests/test_setup.py
