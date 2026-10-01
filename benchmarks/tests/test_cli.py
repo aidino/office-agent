@@ -167,7 +167,7 @@ def test_run_help_documents_resume_flags(capsys) -> None:
     with pytest.raises(SystemExit) as exc_info:
         main(["run", "--help"])
     assert exc_info.value.code == 0
-    out = capsys.readouterr().out
+    out = capsys.readouterr().out.lower()
     assert "--run-id" in out
     assert "--no-resume" in out
     assert "re-run" in out
