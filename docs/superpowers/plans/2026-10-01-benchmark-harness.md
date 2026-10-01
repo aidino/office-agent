@@ -4018,7 +4018,13 @@ Result: 21 tests PASS (plan expected 8; implementation added 10 edge-case and co
 Commits:
 - `908b050` — `test(bench): add reproducer for SpreadsheetBench 2 suite adapter (Task 9 RED)`
 - `03a7970` — `feat(bench): add SpreadsheetBench 2 deterministic suite adapter (Task 9 GREEN)`
+- `1d4a3ef` — `fix(bench): remove dead constant, fix test isolation and layout (Task 9 review)`
 
+**Code review (2026-10-01):** `.claude/reviews/task9-spreadsheet-suite-review.md` — four findings fixed in `1d4a3ef`:
+- M-1: removed dead `_DETERMINISTIC_CATEGORIES` constant
+- M-2: restored `test_evaluate_visualization_deferred` to its section header with proper blank line
+- M-3: rewrote `test_setup_workspace_copies_files` to use isolated `tmp_path` fixture tree (was polluting shared fixture dir)
+- M-4: removed dead `import json as _json`
 ---
 
 ### Task 10: FORTE Suite Adapter with LLM Judge
