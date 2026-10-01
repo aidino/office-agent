@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -242,3 +243,74 @@ def test_runner_workspace_cleanup(tmp_path: Path, monkeypatch) -> None:
     )
     assert created[-1].exists()
     assert (created[-1] / "input.txt").exists()  # setup ran inside it
+
+
+def test_runner_skips_unknown_suite_name(tmp_path: Path) -> None:
+    """A config naming an unregistered suite must not crash the run."""
+    bridge = _make_mock_bridge()
+    config = _default_config(suites=["fakesuite", "not-registered"])
+    runner = Runner(config, {"fakesuite": FakeSuite()}, bridge=bridge)
+    run_dir = runner.run(tmp_path)
+
+    # Registered suite ran completely; unknown name skipped without error
+    assert len(list((run_dir / "fakesuite").glob("*.json"))) == 5
+    assert (run_dir / "report.md").exists()
+
+
+def test_runner_no_resume_reruns_everything(tmp_path: Path) -> None:
+    """no_resume=True re-runs tasks but never duplicates persisted rows."""
+    suite = FakeSuite()
+    bridge = _make_mock_bridge()
+    config = _default_config(limit=2, no_resume=True)
+    runner = Runner(config, {"fakesuite": suite}, bridge=bridge)
+    run_dir = runner.run(tmp_path)
+
+    bridge.reset_mock()
+    runner.run(tmp_path, run_id=run_dir.name)
+
+    # Tasks re-ran despite existing result files…
+    assert bridge.run_task.call_count == 2
+    # …but result JSONs were not overwritten/duplicated (skip-on-exists)
+    assert len(list((run_dir / "fakesuite").glob("*.json"))) == 2
+    # …and the append-only CSV gained no second (run_id, suite) row
+    lines = (tmp_path / "backdata.csv").read_text().strip().split("\n")
+    assert len(lines) == 2
+
+
+def test_runner_meta_survives_git_failure(tmp_path: Path, monkeypatch) -> None:
+    """git unavailable → git_commit falls back to '' and the run completes."""
+
+    def _raise(*a, **kw):
+        raise OSError("git not installed")
+
+    # runner.py does `import subprocess`, so this is the reference it uses
+    monkeypatch.setattr("office_bench.runner.subprocess.run", _raise)
+
+    config = _default_config(limit=1)
+    run_dir = Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=_make_mock_bridge()
+    ).run(tmp_path)
+
+    meta = json.loads((run_dir / "meta.json").read_text())
+    assert meta["git_commit"] == ""
+    assert meta["model"] != ""  # the rest of meta is still populated
+
+
+def test_runner_meta_survives_version_read_failure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Unreadable office_agent pyproject → agent_version '' and run completes."""
+    import tomllib as _tomllib
+
+    def _raise(f):
+        raise _tomllib.TOMLDecodeError("truncated", "pyproject.toml", 0)
+
+    monkeypatch.setattr("office_bench.runner.tomllib.load", _raise)
+
+    config = _default_config(limit=1)
+    run_dir = Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=_make_mock_bridge()
+    ).run(tmp_path)
+
+    meta = json.loads((run_dir / "meta.json").read_text())
+    assert meta["agent_version"] == ""
