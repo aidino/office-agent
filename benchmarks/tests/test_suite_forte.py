@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
+from office_bench.judges.base import RubricResult
 from office_bench.suites.forte import ForteSuite
 from office_bench.suites.base import AgentOutput, Task
 
@@ -143,9 +145,6 @@ def test_evaluate_llm_judge_delegates_to_judge_backend(
     assert t.metadata["grading_type"] == "llm_judge"
 
     # Inject a mock judge that always passes
-    from unittest.mock import MagicMock
-    from office_bench.judges.base import RubricResult
-
     mock_judge = MagicMock()
     mock_judge.name = "llm:test-model"
     mock_judge.judge_rubric.return_value = RubricResult(
@@ -166,9 +165,6 @@ def test_evaluate_llm_judge_fails_when_rubric_fails(
     """If LLM judge fails a rubric, the task must fail."""
     tasks = suite.load_tasks()
     t = next(t for t in tasks if t.task_id == "finance-001")
-
-    from unittest.mock import MagicMock
-    from office_bench.judges.base import RubricResult
 
     mock_judge = MagicMock()
     mock_judge.name = "llm:test-model"

@@ -17,7 +17,7 @@ class FakeDeepSeekHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length)) if length else {}
+        self.rfile.read(length)  # drain request body
 
         # Return a response that the judge can parse as "PASS"
         response = {

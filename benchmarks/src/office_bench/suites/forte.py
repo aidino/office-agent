@@ -6,7 +6,9 @@ import importlib.util
 import logging
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 
 import yaml
 
@@ -15,6 +17,7 @@ from office_bench.judges.llm import LLMJudge
 from office_bench.suites.base import AgentOutput, Task, TaskResult
 
 _log = logging.getLogger(__name__)
+_SENTINEL: ModuleType | None = object()  # type: ignore[assignment]
 
 
 class ForteSuite:
@@ -30,6 +33,7 @@ class ForteSuite:
     def __init__(self, repo_dir: Path, judge: LLMJudge | None = None) -> None:
         self._repo_dir = repo_dir
         self._judge = judge or LLMJudge()
+        self._grader_module: ModuleType | None = _SENTINEL
 
     # ── Suite protocol ──────────────────────────────────────────────
 
@@ -179,18 +183,29 @@ class ForteSuite:
 
     # ── internals ───────────────────────────────────────────────────
 
-    def _load_grader(self):
-        """Import judge/grade.py from the FORTE submodule."""
+    def _load_grader(self) -> Callable[..., tuple[bool, dict]] | None:
+        """Import judge/grade.py from the FORTE submodule.
+
+        The module is cached after the first successful load so repeated
+        ``evaluate()`` calls do not re-execute the file.
+        """
+        if self._grader_module is not _SENTINEL:
+            fn = getattr(self._grader_module, "grade_one", None)
+            return fn  # type: ignore[return-value]
+
         grade_path = self._repo_dir / "judge" / "grade.py"
         if not grade_path.exists():
+            self._grader_module = None
             return None
         spec = importlib.util.spec_from_file_location(
-            f"forte_grade_{abs(hash(str(self._repo_dir)))}", grade_path
+            f"forte_grade_{id(self)}", grade_path
         )
         if spec is None or spec.loader is None:
+            self._grader_module = None
             return None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
+        self._grader_module = module
         return getattr(module, "grade_one", None)
 
     def _solution_dir(self, task: Task) -> Path | None:
