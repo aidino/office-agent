@@ -1,0 +1,14 @@
+{
+  "task_type": "Create_new_slides",
+  "session_id": "session_1",
+  "turns": [
+    {
+      "turn_id": 1,
+      "instruction": "Create a title slide with text 'Hello World'"
+    },
+    {
+      "turn_id": 2,
+      "instruction": "Add a second slide with bullet points"
+    }
+  ]
+}

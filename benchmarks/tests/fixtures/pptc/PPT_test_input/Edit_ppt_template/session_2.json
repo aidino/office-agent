@@ -1,0 +1,11 @@
+{
+  "task_type": "Edit_ppt_template",
+  "session_id": "session_2",
+  "template": "template.pptx",
+  "turns": [
+    {
+      "turn_id": 1,
+      "instruction": "Change the title to 'Updated Title'"
+    }
+  ]
+}
