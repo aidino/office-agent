@@ -289,3 +289,38 @@ def test_aggregate_suite_metric_names() -> None:
     assert aggregate_suite(
         [{"suite": "integ", "passed": True, "score": 1.0}], "integ"
     )["primary_metric"] == "accuracy"
+
+
+def test_generate_report_survives_corrupt_meta_json(run_dir: Path) -> None:
+    """Review M1: a truncated meta.json must not break report generation."""
+    (run_dir / "meta.json").write_text('{"model": "trunca')  # crash mid-save
+    aggregated = {
+        "officebench": {
+            "primary_metric": "accuracy",
+            "primary_value": 50.0,
+            "tasks_run": 1,
+            "tasks_total": 2,
+        }
+    }
+    path = generate_report(run_dir, aggregated, REFERENCE_SCORES)
+    content = path.read_text()
+    # Report is still generated, with the results table intact
+    assert "officebench" in content
+    assert "50.0" in content
+    # The unreadable section is reported honestly, not crashed on
+    assert "meta.json unreadable" in content
+
+
+def test_aggregate_forte_skips_rows_missing_task_id() -> None:
+    """Review M2: stray rows without task_id must be skipped, not crash."""
+    results = [
+        {"suite": "forte", "task_id": "t1", "run": 1, "score": 1.0},
+        {"suite": "forte", "score": 1.0},  # alien row — no task_id
+        {"suite": "forte", "task_id": "t1", "run": 2, "score": 0.0},
+    ]
+    agg = aggregate_suite(results, "forte")
+    assert agg["primary_metric"] == "avg_at_2"
+    assert abs(agg["primary_value"] - 50.0) < 0.1
+    assert agg["tasks_run"] == 1
+    # result_rows counts only rows that entered aggregation
+    assert agg["result_rows"] == 2
