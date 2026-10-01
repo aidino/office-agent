@@ -257,6 +257,238 @@ def test_runner_skips_unknown_suite_name(tmp_path: Path) -> None:
     assert (run_dir / "report.md").exists()
 
 
+# ---------------------------------------------------------------------------
+# Review-fix reproducers (.claude/reviews/task5-runner-orchestrator-review.md)
+# ---------------------------------------------------------------------------
+
+
+def _read_backdata_rows(path: Path) -> list[dict]:
+    with path.open(newline="") as f:
+        return list(csv.DictReader(f))
+
+
+class ExplodingSuite(FakeSuite):
+    """evaluate() raises on t2 — models a broken suite fixture/evaluator."""
+
+    def evaluate(
+        self, task: Task, workspace_dir: Path, agent_output: AgentOutput
+    ) -> TaskResult:
+        if task.task_id == "t2":
+            raise RuntimeError("boom: evaluator exploded")
+        return super().evaluate(task, workspace_dir, agent_output)
+
+
+def test_runner_unknown_suite_never_pollutes_backdata(
+    tmp_path: Path, capsys
+) -> None:
+    """M-A: a typo'd suite name must not append a permanent n/a CSV row."""
+    bridge = _make_mock_bridge()
+    config = _default_config(suites=["fakesuite", "not-registered"])
+    run_dir = Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=bridge
+    ).run(tmp_path)
+
+    backdata = tmp_path / "backdata.csv"
+    rows = _read_backdata_rows(backdata)
+    assert len(rows) == 1  # exactly one row — no junk row for the typo
+    assert rows[0]["suite"] == "fakesuite"
+    assert rows[0]["primary_value"] == "100.0"
+
+    # The operator gets a signal instead of silence
+    assert "not-registered" in capsys.readouterr().err
+    assert "not-registered" not in (run_dir / "report.md").read_text()
+
+
+def test_runner_aggregates_by_suite_name_not_registry_key(
+    tmp_path: Path,
+) -> None:
+    """M-A trigger 2: results are persisted under suite.name, so aggregation
+    and the backdata row must key on suite.name, not the registry key."""
+    bridge = _make_mock_bridge()
+    config = _default_config(suites=["fs"])
+    Runner(config, {"fs": FakeSuite()}, bridge=bridge).run(tmp_path)
+
+    rows = _read_backdata_rows(tmp_path / "backdata.csv")
+    assert len(rows) == 1
+    assert rows[0]["suite"] == "fakesuite"  # suite.name, not the "fs" key
+    assert rows[0]["primary_value"] == "100.0"
+    assert rows[0]["tasks_run"] == "5"
+
+
+def test_runner_resume_reruns_truncated_result(tmp_path: Path) -> None:
+    """M-1: a crash-truncated result file is not "completed" — the task
+    re-runs and the aggregate never silently loses it."""
+    run_dir = tmp_path / "R"
+    (run_dir / "fakesuite").mkdir(parents=True)
+    (run_dir / "fakesuite" / "t0_run1.json").write_text('{"task_id": "t0", "sui')
+
+    bridge = _make_mock_bridge()
+    config = _default_config()
+    Runner(config, {"fakesuite": FakeSuite()}, bridge=bridge).run(
+        tmp_path, run_id="R"
+    )
+
+    # t0 re-ran (file existence alone must not count as completed)
+    assert bridge.run_task.call_count == 5
+    # The truncated file was replaced by a valid result
+    data = json.loads((run_dir / "fakesuite" / "t0_run1.json").read_text())
+    assert data["task_id"] == "t0"
+    assert data["passed"] is True
+    # The aggregate reflects all 5 tasks, not the 4 survivors
+    rows = _read_backdata_rows(tmp_path / "backdata.csv")
+    assert rows[0]["tasks_run"] == "5"
+
+
+def test_runner_task_exception_is_isolated_and_persisted(
+    tmp_path: Path, capsys
+) -> None:
+    """M-2: one crashing task must not abort the run — it is recorded as a
+    failed result so the aggregate reflects the gap instead of hiding it."""
+    bridge = _make_mock_bridge()
+    config = _default_config()
+    run_dir = Runner(
+        config, {"fakesuite": ExplodingSuite()}, bridge=bridge
+    ).run(tmp_path)
+
+    # The run completed: report + backdata exist
+    assert (run_dir / "report.md").exists()
+    rows = _read_backdata_rows(tmp_path / "backdata.csv")
+    assert len(rows) == 1
+
+    # The crashed task is persisted as failed with an explicit note
+    t2 = json.loads((run_dir / "fakesuite" / "t2_run1.json").read_text())
+    assert t2["passed"] is False
+    assert t2["judge_backend"] is None
+    assert "boom" in t2["notes"]
+
+    # The other four passed; the aggregate counts all 5 (4/5 = 80.0)
+    assert rows[0]["tasks_run"] == "5"
+    assert rows[0]["primary_value"] == "80.0"
+    assert "t2" in capsys.readouterr().err
+
+
+def test_runner_workspace_cleanup_on_task_exception(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """M-2/L-3b: workspaces are removed even when the task crashes."""
+    created: list[Path] = []
+
+    def _fake_mkdtemp(prefix: str = "") -> str:
+        d = tmp_path / f"{prefix}ws{len(created)}"
+        d.mkdir()
+        created.append(d)
+        return str(d)
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _fake_mkdtemp)
+
+    config = _default_config(keep_workspaces=False)
+    run_dir = Runner(
+        config, {"fakesuite": ExplodingSuite()}, bridge=_make_mock_bridge()
+    ).run(tmp_path / "out")
+
+    assert (run_dir / "report.md").exists()  # run completed despite crash
+    assert len(created) == 5
+    assert not any(p.exists() for p in created)  # every workspace cleaned
+
+
+def test_runner_resume_preserves_meta_provenance(tmp_path: Path) -> None:
+    """M-3: resume keeps the first run's timestamp/commit in meta.json
+    (matching the frozen backdata row) and records the resume separately."""
+    bridge = _make_mock_bridge()
+    config = _default_config(limit=1)
+    run_dir = Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=bridge
+    ).run(tmp_path)
+    first_meta = json.loads((run_dir / "meta.json").read_text())
+
+    Runner(config, {"fakesuite": FakeSuite()}, bridge=bridge).run(
+        tmp_path, run_id=run_dir.name
+    )
+    resumed_meta = json.loads((run_dir / "meta.json").read_text())
+
+    assert resumed_meta["timestamp"] == first_meta["timestamp"]
+    assert resumed_meta["git_commit"] == first_meta["git_commit"]
+    assert "resumed_at" in resumed_meta
+
+    # The CSV row keeps the original timestamp (append-only history)
+    rows = _read_backdata_rows(tmp_path / "backdata.csv")
+    assert len(rows) == 1
+    assert rows[0]["timestamp"] == first_meta["timestamp"]
+
+
+def test_runner_resume_replaces_corrupt_meta(tmp_path: Path) -> None:
+    """A truncated meta.json is replaced by fresh meta on resume."""
+    run_dir = tmp_path / "R"
+    run_dir.mkdir()
+    (run_dir / "meta.json").write_text('{"run_id": "R", "sui')
+
+    config = _default_config(limit=1)
+    Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=_make_mock_bridge()
+    ).run(tmp_path, run_id="R")
+
+    meta = json.loads((run_dir / "meta.json").read_text())
+    assert meta["run_id"] == "R"
+
+
+def test_runner_partial_resume_completes_remainder(tmp_path: Path) -> None:
+    """L-3a: crash mid-suite before any backdata row — resume runs only the
+    missing tasks and the final row covers the full suite."""
+    from office_bench.results import save_task_result
+
+    seed_dir = tmp_path / "R"
+    (seed_dir / "fakesuite").mkdir(parents=True)
+    for tid in ("t0", "t1"):
+        save_task_result(
+            seed_dir,
+            TaskResult(
+                task_id=tid,
+                suite="fakesuite",
+                passed=True,
+                score=1.0,
+                breakdown={},
+                notes="",
+                judge_backend="deterministic",
+            ),
+            run_number=1,
+            agent_output=AgentOutput(
+                messages=[], files_created=[], tool_calls=[], duration_seconds=1.0
+            ),
+        )
+
+    bridge = _make_mock_bridge()
+    config = _default_config()  # all 5 tasks
+    run_dir = Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=bridge
+    ).run(tmp_path, run_id="R")
+
+    assert bridge.run_task.call_count == 3  # only the missing three re-ran
+    assert len(list((run_dir / "fakesuite").glob("*.json"))) == 5
+    rows = _read_backdata_rows(tmp_path / "backdata.csv")
+    assert len(rows) == 1
+    assert rows[0]["tasks_run"] == "5"
+
+
+def test_runner_result_json_content(tmp_path: Path) -> None:
+    """L-3d: pin the persisted result JSON schema, not just file counts."""
+    bridge = _make_mock_bridge()
+    config = _default_config(limit=1)
+    run_dir = Runner(
+        config, {"fakesuite": FakeSuite()}, bridge=bridge
+    ).run(tmp_path)
+
+    data = json.loads((run_dir / "fakesuite" / "t0_run1.json").read_text())
+    assert data["task_id"] == "t0"
+    assert data["suite"] == "fakesuite"
+    assert data["run"] == 1
+    assert data["passed"] is True
+    assert data["score"] == 1.0
+    assert data["judge_backend"] == "deterministic"
+    assert data["duration_seconds"] == 2.0
+    assert "timestamp" in data
+    assert data["agent_output"]["response_text"] == "done"
+
+
 def test_runner_no_resume_reruns_everything(tmp_path: Path) -> None:
     """no_resume=True re-runs tasks but never duplicates persisted rows."""
     suite = FakeSuite()
