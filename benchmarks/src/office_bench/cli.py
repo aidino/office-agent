@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -157,8 +158,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_setup(_args: argparse.Namespace) -> int:
-    """Clone submodules and verify prerequisites."""
-    print("Running git submodule update...")
+    """Clone submodules, download datasets, and verify prerequisites."""
+
+    # Step 1/6: Git submodules
+    print("Step 1/6: Updating git submodules...")
     try:
         result = subprocess.run(
             ["git", "submodule", "update", "--init", "--recursive"],
@@ -173,7 +176,64 @@ def _cmd_setup(_args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    print("Setup complete. Verify JUDGE_MODEL / JUDGE_API_KEY env vars.")
+
+    # Step 2/6: SpreadsheetBench 2 dataset from HuggingFace
+    print("Step 2/6: Checking SpreadsheetBench 2 dataset...")
+    dataset_dir = DATA_BASE / "datasets" / "spreadsheet"
+    if not dataset_dir.exists():
+        print(f"  → Download KAKA22/SpreadsheetBench-v2 to {dataset_dir}")
+        print(
+            "  → Run: huggingface-cli download KAKA22/SpreadsheetBench-v2"
+            f" --local-dir {dataset_dir}"
+        )
+    else:
+        print("  → Dataset already present.")
+
+    # Step 3/6: PPTC label files
+    print("Step 3/6: Checking PPTC label files...")
+    pptc_dir = DATA_BASE / "PPTC"
+    if pptc_dir.exists():
+        label_dirs = list(pptc_dir.glob("PPT_label_*"))
+        if not label_dirs:
+            print(
+                "  → Generate labels:"
+                " cd data/benchmarks/PPTC && python main.py --prepare"
+            )
+        else:
+            print("  → Label files already present.")
+    else:
+        print("  → PPTC submodule not cloned yet.")
+
+    # Step 4/6: LibreOffice
+    print("Step 4/6: Checking LibreOffice...")
+    lo_result = subprocess.run(
+        ["which", "libreoffice"], capture_output=True, text=True,
+    )
+    if lo_result.returncode != 0:
+        print("  ⚠️  LibreOffice not found. Required for SpreadsheetBench 2 recalc.")
+    else:
+        print("  → LibreOffice found.")
+
+    # Step 5/6: FORTE judge module
+    print("Step 5/6: Checking FORTE judge module...")
+    forte_judge = DATA_BASE / "FORTE" / "judge"
+    if forte_judge.exists():
+        print("  → FORTE judge directory found.")
+    else:
+        print("  → FORTE submodule not ready. Judge won't work until cloned.")
+
+    # Step 6/6: API keys
+    print("Step 6/6: Checking API keys...")
+    api_key = os.environ.get("JUDGE_API_KEY") or os.environ.get("BUB_API_KEY", "")
+    if api_key:
+        print("  → JUDGE_API_KEY / BUB_API_KEY set.")
+    else:
+        print(
+            "  ⚠️  Neither JUDGE_API_KEY nor BUB_API_KEY is set."
+            " LLM judge won't work."
+        )
+
+    print("\nSetup complete.")
     return 0
 
 

@@ -1,0 +1,15 @@
+[submodule "data/benchmarks/FORTE"]
+	path = data/benchmarks/FORTE
+	url = https://github.com/AGI-Eval-Official/FORTE.git
+
+[submodule "data/benchmarks/OfficeBench"]
+	path = data/benchmarks/OfficeBench
+	url = https://github.com/zlwang-cs/OfficeBench.git
+
+[submodule "data/benchmarks/SpreadsheetBench-2"]
+	path = data/benchmarks/SpreadsheetBench-2
+	url = https://github.com/RUCKBReasoning/SpreadsheetBench-2.git
+
+[submodule "data/benchmarks/PPTC"]
+	path = data/benchmarks/PPTC
+	url = https://github.com/gydpku/PPTC.git
