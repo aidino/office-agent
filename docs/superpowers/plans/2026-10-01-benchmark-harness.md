@@ -4801,6 +4801,8 @@ git add benchmarks/src/office_bench/suites/forte.py benchmarks/src/office_bench/
 git commit -m "feat(bench): add FORTE suite adapter and LLM judge backend"
 ```
 
+- [x] **Step 9 (review):** Code review — fixed grader cache (sentinel pattern), deterministic module naming (`id(self)`), return type annotation, dead variable, inline imports. Commit `36e0acf`. Review: `.claude/reviews/task10-forte-llm-judge-review.md`
+
 ---
 
 ### Task 11: Setup Command &amp; Git Submodules
