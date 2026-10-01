@@ -153,5 +153,13 @@ and [DeepAgents overview](https://docs.langchain.com/oss/python/deepagents/overv
 | `requirements.txt` | Extra Python dependencies. |
 | `tests/test_binding.py` | Unit and stub-server integration tests for the binding. |
 | `tests/test_tools.py` | Workspace confinement and tool behavior tests. |
+| `tests/test_workspace_binding.py` | Per-request workspace scoping tests. |
+
+## Benchmark Harness
+
+The companion `benchmarks/` package (`office_bench`) evaluates this agent
+across four external benchmark suites (FORTE, OfficeBench, SpreadsheetBench 2,
+PPTC). See [`../benchmarks/README.md`](../benchmarks/README.md) for full
+documentation and [`../docs/RUNBOOK.md`](../docs/RUNBOOK.md) for operations.
 
 Author: Dino
