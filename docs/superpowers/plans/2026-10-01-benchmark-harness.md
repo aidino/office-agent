@@ -4056,7 +4056,7 @@ submodule, and integrates the LLM judge backend.
 
 
 
-- [ ] **Step 1: Create fixture test data**
+- [x] **Step 1: Create fixture test data** — commit `934b848`
 
 Create `benchmarks/tests/fixtures/forte/data/tasks/finance-001.md`:
 
@@ -4154,7 +4154,7 @@ def grade_one(
 
 
 
-- [ ] **Step 2: Write the failing test for FORTE suite**
+- [x] **Step 2: Write the failing test for FORTE suite** — commit `934b848`
 
 Create `benchmarks/tests/test_suite_forte.py`:
 
@@ -4296,7 +4296,7 @@ def test_evaluate_grader_missing_fails_cleanly(tmp_path: Path) -> None:
 
 
 
-- [ ] **Step 3: Write the failing test for LLM judge**
+- [x] **Step 3: Write the failing test for LLM judge** — commit `934b848`
 
 Create `benchmarks/tests/test_judge_llm.py`:
 
@@ -4426,7 +4426,7 @@ def test_llm_judge_rubric_fail(mock_api) -> None:
 
 
 
-- [ ] **Step 4: Run tests to verify they fail**
+- [x] **Step 4: Run tests to verify they fail** — RED confirmed: `ModuleNotFoundError` for both modules
 
 ```bash
 cd benchmarks && uv run pytest tests/test_suite_forte.py tests/test_judge_llm.py -v
@@ -4436,7 +4436,7 @@ Expected: FAIL — modules not found.
 
 
 
-- [ ] **Step 5: Implement `benchmarks/src/office_bench/judges/llm.py`**
+- [x] **Step 5: Implement `benchmarks/src/office_bench/judges/llm.py`** — commit `91efb60`
 
 ```python
 """LLM judge backend via OpenAI-compatible API (DeepSeek default)."""
@@ -4542,7 +4542,7 @@ class LLMJudge:
 
 
 
-- [ ] **Step 6: Implement `benchmarks/src/office_bench/suites/forte.py`**
+- [x] **Step 6: Implement `benchmarks/src/office_bench/suites/forte.py`** — commit `91efb60`
 
 ```python
 """FORTE suite adapter — native grade_one + LLM judge evaluation."""
@@ -4774,7 +4774,7 @@ class ForteSuite:
 
 
 
-- [ ] **Step 7: Run tests to verify they pass**
+- [x] **Step 7: Run tests to verify they pass** — 12 PASS, 87% coverage
 
 ```bash
 cd benchmarks && uv run pytest tests/test_suite_forte.py tests/test_judge_llm.py -v
@@ -4794,7 +4794,7 @@ Expected: all 10 tests PASS.
 
 
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit** — `91efb60` feat(bench): add FORTE suite adapter and LLM judge backend
 
 ```bash
 git add benchmarks/src/office_bench/suites/forte.py benchmarks/src/office_bench/judges/llm.py benchmarks/tests/test_suite_forte.py benchmarks/tests/test_judge_llm.py benchmarks/tests/fixtures/forte/
