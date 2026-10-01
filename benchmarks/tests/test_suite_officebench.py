@@ -177,3 +177,22 @@ def test_suite_satisfies_protocol(suite: OfficeBenchSuite) -> None:
     from office_bench.suites.base import Suite
 
     assert isinstance(suite, Suite)
+
+
+def test_evaluate_caches_native_module(suite: OfficeBenchSuite, tmp_path: Path) -> None:
+    """Native evaluation module is loaded once and reused across evaluate() calls."""
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "1-1")
+
+    # First call — module loaded
+    (tmp_path / "budget.xlsx").write_bytes(b"fake")
+    r1 = suite.evaluate(t, tmp_path, _make_output(["budget.xlsx"]))
+    assert r1.passed is True
+
+    # Grab cached module reference
+    cached = suite._eval_module  # noqa: SLF001
+
+    # Second call — same module instance reused
+    r2 = suite.evaluate(t, tmp_path, _make_output(["budget.xlsx"]))
+    assert r2.passed is True
+    assert suite._eval_module is cached  # noqa: SLF001

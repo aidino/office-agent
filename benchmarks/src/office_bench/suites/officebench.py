@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import shutil
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 from office_bench.suites.base import AgentOutput, Task, TaskResult
+
+_log = logging.getLogger(__name__)
+_SENTINEL: ModuleType | None = object()  # type: ignore[assignment]
 
 
 class OfficeBenchSuite:
@@ -26,6 +30,7 @@ class OfficeBenchSuite:
 
     def __init__(self, repo_dir: Path) -> None:
         self._repo_dir = repo_dir
+        self._eval_module: ModuleType | None = _SENTINEL
 
     # ── Suite protocol ──────────────────────────────────────────────
 
@@ -111,7 +116,8 @@ class OfficeBenchSuite:
     ) -> Task | None:
         try:
             data = json.loads(json_file.read_text())
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as exc:
+            _log.warning("Skipping malformed task file %s: %s", json_file, exc)
             return None
 
         app_count = data.get("app_count", 1)
@@ -133,18 +139,27 @@ class OfficeBenchSuite:
         )
 
     def _load_native_evaluation(self) -> ModuleType | None:
-        """Import the benchmark's ``evaluation.py`` from the repo dir."""
+        """Import the benchmark's ``evaluation.py`` from the repo dir.
+
+        The module is cached after the first successful load so repeated
+        ``evaluate()`` calls do not re-execute the file.
+        """
+        if self._eval_module is not _SENTINEL:
+            return self._eval_module
+
         eval_path = self._repo_dir / "evaluation.py"
         if not eval_path.exists():
+            self._eval_module = None
             return None
         spec = importlib.util.spec_from_file_location(
-            f"officebench_eval_{abs(hash(str(self._repo_dir)))}",
-            eval_path,
+            f"officebench_eval_{id(self)}", eval_path,
         )
         if spec is None or spec.loader is None:
+            self._eval_module = None
             return None
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)  # type: ignore[union-attr]
+        self._eval_module = module
         return module
 
     def _error_result(
