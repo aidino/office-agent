@@ -14,11 +14,11 @@ import pytest
 
 from office_bench.cli import main
 from office_bench.runner import RunConfig
-from office_bench.suites.base import Task
+from office_bench.suites.base import AgentOutput, Task, TaskResult
 
 
 class FakeSuite:
-    """Minimal suite for `list` — only load_tasks is exercised."""
+    """Minimal suite for `list` and the end-to-end `run` test."""
 
     name = "fakesuite"
 
@@ -28,14 +28,24 @@ class FakeSuite:
             Task("fakesuite", "t2", "p2", "cat-b", [], {}),
         ]
 
-    def setup_workspace(self, *a) -> None:  # pragma: no cover - unused here
+    def setup_workspace(self, task: Task, workspace_dir: Path) -> None:
         pass
 
     def format_prompt(self, t: Task) -> str:
         return t.prompt
 
-    def evaluate(self, *a) -> None:  # pragma: no cover - unused here
-        pass
+    def evaluate(
+        self, task: Task, workspace_dir: Path, agent_output: AgentOutput
+    ) -> TaskResult:
+        return TaskResult(
+            task_id=task.task_id,
+            suite=self.name,
+            passed=True,
+            score=1.0,
+            breakdown={},
+            notes="",
+            judge_backend="deterministic",
+        )
 
 
 def _write_backdata(csv_path: Path, rows: list[list]) -> None:
@@ -362,3 +372,200 @@ def test_dunder_main_forwards_cli_exit_code(
         with pytest.raises(SystemExit) as exc_info:
             importlib.import_module("office_bench.__main__")
     assert exc_info.value.code == 3
+
+
+# --- review findings (loop 2) ---
+
+
+def test_report_tolerates_stray_json(capsys, tmp_path: Path) -> None:
+    """M-1: a stray valid JSON in the run dir must not crash `report` —
+    every other consumer of load_task_results tolerates it."""
+    _write_result("run1", "forte", 1.0, tmp_path)
+    (tmp_path / "run1" / "notes.json").write_text(
+        json.dumps({"note": "operator annotation"})
+    )
+    with patch("office_bench.cli.RESULTS_BASE", tmp_path):
+        ret = main(["report", "--run-id", "run1"])
+    assert ret == 0
+    assert "forte" in (tmp_path / "run1" / "report.md").read_text().lower()
+
+
+def test_compare_tolerates_stray_json(capsys, tmp_path: Path) -> None:
+    """M-1: same crash class in `compare` (stray non-object JSON)."""
+    _write_result("run1", "forte", 0.40, tmp_path)
+    _write_result("run2", "forte", 0.45, tmp_path)
+    (tmp_path / "run2" / "snippet.json").write_text("[1, 2, 3]")
+    with patch("office_bench.cli.RESULTS_BASE", tmp_path):
+        ret = main(["compare", "--runs", "run1", "run2"])
+    assert ret == 0
+    assert "+5.00" in capsys.readouterr().out
+
+
+def test_run_filters_strip_whitespace_and_drop_empty_segments(
+    tmp_path: Path,
+) -> None:
+    """M-2: --task-id/--category must behave like --suite — strip segments,
+    drop empties — so "t1, t2," never silently scopes a run."""
+    with (
+        patch("office_bench.cli._build_suite_registry") as mock_reg,
+        patch("office_bench.cli.Runner") as mock_runner_cls,
+        patch("office_bench.cli.RESULTS_BASE", tmp_path),
+    ):
+        mock_reg.return_value = {"fakesuite": FakeSuite()}
+        ret = main([
+            "run", "--suite", "fakesuite",
+            "--task-id", "t1, t2,",
+            "--category", " cat-a ,, cat-b ",
+        ])
+    assert ret == 0
+    config = mock_runner_cls.call_args[0][0]
+    assert config.task_ids == ["t1", "t2"]
+    assert config.categories == ["cat-a", "cat-b"]
+
+
+def test_run_suite_flag_strips_whitespace(tmp_path: Path) -> None:
+    """Pin-only (M-2 asymmetry): --suite stripping already works."""
+    with (
+        patch("office_bench.cli._build_suite_registry") as mock_reg,
+        patch("office_bench.cli.Runner") as mock_runner_cls,
+        patch("office_bench.cli.RESULTS_BASE", tmp_path),
+    ):
+        mock_reg.return_value = {"suite-a": FakeSuite(), "suite-b": FakeSuite()}
+        ret = main(["run", "--suite", " suite-a , suite-b "])
+    assert ret == 0
+    assert mock_runner_cls.call_args[0][0].suites == ["suite-a", "suite-b"]
+
+
+def test_run_rejects_degenerate_filter_flags(capsys, tmp_path: Path) -> None:
+    """M-2 (R2c): a filter flag with no valid ids must fail loudly, not
+    run zero tasks and append a permanent 0/0 backdata row."""
+    with (
+        patch("office_bench.cli._build_suite_registry", return_value={"fakesuite": FakeSuite()}),
+        patch("office_bench.cli.Runner") as mock_runner_cls,
+        patch("office_bench.cli.RESULTS_BASE", tmp_path),
+    ):
+        ret = main(["run", "--suite", "fakesuite", "--task-id", ","])
+    assert ret == 1
+    assert "task-id" in capsys.readouterr().err.lower()
+    mock_runner_cls.assert_not_called()
+
+
+def test_run_suite_all_with_empty_registry_fails(capsys, tmp_path: Path) -> None:
+    """M-3(a): --suite all with no adapters must be a loud no-op failure,
+    not a successful-looking empty run."""
+    with (
+        patch("office_bench.cli._build_suite_registry", return_value={}),
+        patch("office_bench.cli.Runner") as mock_runner_cls,
+        patch("office_bench.cli.RESULTS_BASE", tmp_path),
+    ):
+        ret = main(["run", "--suite", "all"])
+    assert ret == 1
+    assert "no suite" in capsys.readouterr().err.lower()
+    mock_runner_cls.assert_not_called()
+    assert not (tmp_path / "backdata.csv").exists()
+
+
+def test_run_rejects_degenerate_suite_value(capsys, tmp_path: Path) -> None:
+    """M-3: --suite "," resolves to zero suite names — loud failure."""
+    with (
+        patch("office_bench.cli._build_suite_registry", return_value={"fakesuite": FakeSuite()}),
+        patch("office_bench.cli.Runner") as mock_runner_cls,
+        patch("office_bench.cli.RESULTS_BASE", tmp_path),
+    ):
+        ret = main(["run", "--suite", ","])
+    assert ret == 1
+    assert "suite" in capsys.readouterr().err.lower()
+    mock_runner_cls.assert_not_called()
+
+
+def test_run_rejects_nonpositive_runs_and_limit(tmp_path: Path) -> None:
+    """M-3(b): --runs 0 / --limit 0 / negatives are parser errors, never
+    configs that append permanent 0/0 CSV rows."""
+    for flag in ("--runs", "--limit"):
+        for bad in ("0", "-1", "abc"):
+            with (
+                patch("office_bench.cli._build_suite_registry", return_value={"fakesuite": FakeSuite()}),
+                patch("office_bench.cli.Runner") as mock_runner_cls,
+                patch("office_bench.cli.RESULTS_BASE", tmp_path),
+                pytest.raises(SystemExit) as exc_info,
+            ):
+                main(["run", "--suite", "fakesuite", flag, bad])
+            assert exc_info.value.code == 2
+            mock_runner_cls.assert_not_called()
+
+
+def test_compare_marks_suites_missing_from_one_run(capsys, tmp_path: Path) -> None:
+    """M-4: a suite absent from one run is 'not run' — no fabricated
+    delta that reads as a regression or improvement."""
+    _write_result("run1", "forte", 0.45, tmp_path)
+    _write_result("run2", "pptc", 1.0, tmp_path)
+    with patch("office_bench.cli.RESULTS_BASE", tmp_path):
+        ret = main(["compare", "--runs", "run1", "run2"])
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert out.count("not run") == 2
+    assert "-45.00" not in out
+    assert "+100.00" not in out
+
+
+def test_setup_reports_git_failure(capsys) -> None:
+    """L-1: a failing git must not print 'Setup complete' and exit 0."""
+    with patch("office_bench.cli.subprocess") as mock_sub:
+        mock_sub.run.return_value = MagicMock(returncode=128)
+        ret = main(["setup"])
+    assert ret == 1
+    assert "failed" in capsys.readouterr().err.lower()
+
+
+def test_setup_survives_missing_git(capsys) -> None:
+    """L-1: a missing git binary is a clean error, not a traceback."""
+    with patch("office_bench.cli.subprocess") as mock_sub:
+        mock_sub.run.side_effect = OSError("No such file or directory: 'git'")
+        ret = main(["setup"])
+    assert ret == 1
+    assert "git" in capsys.readouterr().err.lower()
+
+
+def test_trend_indicates_truncation(capsys, tmp_path: Path) -> None:
+    """L-2: truncating to the last 10 rows must be visible to the operator."""
+    _write_backdata(tmp_path / "backdata.csv", [
+        [f"run{i:02d}", "t", "c", "v", "m", "forte", 10, 10, "avg_at_3", 40.0 + i, "{}"]
+        for i in range(1, 13)
+    ])
+    with patch("office_bench.cli.RESULTS_BASE", tmp_path):
+        ret = main(["trend"])
+    assert ret == 0
+    out = capsys.readouterr().out
+    assert "of 12" in out  # truncation marker: showing N most recent of 12
+    assert "run01" not in out
+    assert "run12" in out
+
+
+def test_run_end_to_end_writes_honest_backdata_row(capsys, tmp_path: Path) -> None:
+    """L-3(a)/M-2 end-to-end: real Runner (fake suite, mock bridge) via the
+    CLI — whitespace in --task-id runs BOTH tasks and the CSV row says 2/2."""
+    with (
+        patch("office_bench.cli._build_suite_registry", return_value={"fakesuite": FakeSuite()}),
+        patch("office_bench.runner.AgentBridge") as mock_bridge_cls,
+        patch("office_bench.cli.RESULTS_BASE", tmp_path),
+    ):
+        mock_bridge_cls.return_value = MagicMock()
+        mock_bridge_cls.return_value.run_task.return_value = AgentOutput(
+            messages=[{"role": "assistant", "content": "done"}],
+            files_created=[],
+            tool_calls=[],
+            duration_seconds=1.0,
+        )
+        ret = main([
+            "run", "--suite", "fakesuite",
+            "--task-id", "t1, t2",
+            "--run-id", "e2e",
+        ])
+    assert ret == 0
+    with (tmp_path / "backdata.csv").open() as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["suite"] == "fakesuite"
+    assert rows[0]["tasks_run"] == "2"
+    assert rows[0]["tasks_total"] == "2"
+    assert rows[0]["primary_value"] == "100.0"
