@@ -127,10 +127,20 @@ def aggregate_suite(results: list[dict], suite_name: str) -> dict:
 
 
 def _aggregate_forte(results: list[dict]) -> dict:
-    """Avg@N: mean of per-task mean scores across runs."""
+    """Avg@N: mean of per-task mean scores across runs.
+
+    Rows without a ``task_id`` (e.g. a stray valid JSON ingested by
+    ``load_task_results``) are skipped, so one alien file cannot crash
+    aggregation after a full run.
+    """
     by_task: dict[str, list[float]] = defaultdict(list)
+    ingested = 0
     for r in results:
-        by_task[r["task_id"]].append(r["score"])
+        task_id = r.get("task_id")
+        if not task_id:
+            continue
+        by_task[task_id].append(r.get("score", 0.0))
+        ingested += 1
 
     task_avgs = [sum(scores) / len(scores) for scores in by_task.values()]
     n = max(len(scores) for scores in by_task.values()) if by_task else 1
@@ -142,7 +152,7 @@ def _aggregate_forte(results: list[dict]) -> dict:
         # unique tasks, not task×run rows, so reports never show "6/2 tasks"
         "tasks_run": len(by_task),
         "tasks_total": len(by_task),
-        "result_rows": len(results),
+        "result_rows": ingested,
     }
 
 
@@ -196,11 +206,19 @@ def generate_report(
     # Meta
     meta_path = run_dir / "meta.json"
     if meta_path.exists():
-        meta = json.loads(meta_path.read_text())
-        lines.append("## Run Metadata\n")
-        for k, v in meta.items():
-            lines.append(f"- **{k}**: {v}")
-        lines.append("")
+        try:
+            meta = json.loads(meta_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            # e.g. truncated by a crash mid-save — the per-task results
+            # are still reportable
+            meta = None
+        if meta is None:
+            lines.append("_Note: meta.json unreadable — run metadata omitted._\n")
+        else:
+            lines.append("## Run Metadata\n")
+            for k, v in meta.items():
+                lines.append(f"- **{k}**: {v}")
+            lines.append("")
 
     # Results table
     lines.append("## Results\n")
