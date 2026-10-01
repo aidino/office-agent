@@ -1263,7 +1263,7 @@ backdata CSV, and generate Markdown reports. This task also creates the
 
 
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `benchmarks/tests/test_results.py`:
 
@@ -1472,7 +1472,7 @@ def test_reference_scores_has_all_suites() -> None:
 
 
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_results.py -v
@@ -1482,7 +1482,7 @@ Expected: FAIL — `office_bench.results` not found.
 
 
 
-- [ ] **Step 3: Implement `benchmarks/src/office_bench/reference.py`**
+- [x] **Step 3: Implement `benchmarks/src/office_bench/reference.py`**
 
 ```python
 """Hardcoded reference scores from published papers and leaderboards."""
@@ -1529,7 +1529,7 @@ REFERENCE_SCORES: dict[str, dict] = {
 
 
 
-- [ ] **Step 4: Implement `benchmarks/src/office_bench/results.py`**
+- [x] **Step 4: Implement `benchmarks/src/office_bench/results.py`**
 
 ```python
 """JSON persistence, backdata CSV, and Markdown report generation."""
@@ -1756,7 +1756,7 @@ def generate_report(
 
 
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_results.py -v
@@ -1766,7 +1766,7 @@ Expected: all 11 tests PASS.
 
 
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add benchmarks/src/office_bench/results.py benchmarks/src/office_bench/reference.py benchmarks/tests/test_results.py
