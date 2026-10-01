@@ -78,3 +78,41 @@ def test_restores_previous_value(monkeypatch, tmp_path) -> None:
 
     assert inner.seen == [str(tmp_path)]
     assert os.environ[WORKSPACE_ENV] == "/srv/old"
+
+
+class _RaisingInner:
+    async def ainvoke(self, runnable_input, /, **kwargs):
+        raise RuntimeError("agent exploded mid-run")
+
+
+def test_restores_env_when_inner_raises(monkeypatch, tmp_path) -> None:
+    """A failed run must not leak its workspace into the next benchmark task."""
+
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    wrapped = WorkspaceScopedRunnable(_RaisingInner())
+
+    try:
+        asyncio.run(wrapped.ainvoke({"messages": []}, config=_config(str(tmp_path))))
+        raise AssertionError("Should have raised RuntimeError")
+    except RuntimeError:
+        pass
+    assert WORKSPACE_ENV not in os.environ
+
+
+def test_build_spec_wraps_agent_in_workspace_scope(monkeypatch) -> None:
+    """build_spec must hand agentseek the wrapped runnable, not the bare agent."""
+
+    from office_agent import binding
+
+    captured = {}
+
+    def fake_messages_spec(runnable, **kwargs):
+        captured["runnable"] = runnable
+        return "spec"
+
+    monkeypatch.setattr(binding, "build_agent", lambda: "bare-agent")
+    monkeypatch.setattr(binding, "messages_spec", fake_messages_spec)
+
+    assert binding.build_spec() == "spec"
+    assert isinstance(captured["runnable"], WorkspaceScopedRunnable)
+    assert captured["runnable"]._inner == "bare-agent"
