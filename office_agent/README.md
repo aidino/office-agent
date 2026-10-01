@@ -1,19 +1,25 @@
 # Office Agent
 
-A backend-only agent service: a DeepAgents runnable exposed through an AG-UI
-gateway, scaffolded with `agentseek create deepagents`. It is intentionally
-minimal and does not include a frontend.
+A backend-only office agent: a DeepAgents runnable exposed through an AG-UI
+gateway, scaffolded with `agentseek create deepagents` and adapted for
+everyday office work on documents, spreadsheets, and presentations. It is
+intentionally minimal and does not include a frontend.
 
 - Runtime model: DeepSeek `deepseek-flash`, resolved as `openai:deepseek-flash`
   through DeepSeek's OpenAI-compatible endpoint (see Environment below).
-- Tools: `outline_answer(topic)` — returns a lightweight response outline for
-  planning-heavy prompts.
-- Default system prompt: answer in the same language as the user's question.
+- System prompt: an office assistant persona that must read files through
+  tools before commenting on them and answers in the user's language.
+- Tools (all paths confined to the agent workspace, see Environment):
+  - `read_text_file(path)` — plain-text files (.txt, .csv, .md).
+  - `read_pdf_file(path)` — PDF text extraction, page by page.
+  - `read_spreadsheet(path)` — .xlsx workbooks rendered as Markdown tables.
+  - `write_spreadsheet(path, sheet_name, rows)` — create .xlsx files.
+  - `write_presentation(path, title, slides)` — create .pptx decks.
 
 The binding export is:
 
 ```text
-office_agent.demo_binding:build_spec
+office_agent.binding:build_spec
 ```
 
 ## Quickstart
@@ -43,6 +49,11 @@ settings read `BUB_MODEL`, `BUB_API_KEY`, and optional `BUB_API_BASE`, with
 The template defaults to the DeepSeek `deepseek-flash` model via DeepSeek's
 OpenAI-compatible endpoint, so set `BUB_API_KEY` to a DeepSeek API key.
 
+`OFFICE_AGENT_WORKSPACE` (optional) sets the absolute root directory the
+office tools may read from and write to. It defaults to the working
+directory of the gateway process. Every tool resolves its path argument
+inside this root and rejects any path that escapes it.
+
 ## Testing
 
 ### Static checks
@@ -58,13 +69,13 @@ uvx agentseek doctor   # lifecycle spec, uv, paths, env checks
 uv run pytest -q
 ```
 
-- `test_build_agent_disables_responses_api_for_openai_provider` — the binding
-  registers the `openai` ProviderProfile and passes the configured model
-  through to `create_deep_agent()`.
-- `test_build_agent_uses_chat_completions_with_real_deepagents` — runs the
-  real DeepAgents stack against a local stub Chat Completions server and
-  asserts the request hits `<base>/chat/completions`. No network or API key
-  required.
+- `tests/test_binding.py` — the binding registers the `openai`
+  ProviderProfile, passes the configured model and the office tools to
+  `create_deep_agent()`, and runs the real DeepAgents stack against a local
+  stub Chat Completions server (no network or API key required).
+- `tests/test_tools.py` — workspace confinement (inside allowed, escapes
+  rejected for both reads and writes) and per-tool behavior: text read,
+  PDF page extraction, spreadsheet roundtrip, presentation writing.
 
 ### Manual end-to-end
 
@@ -83,9 +94,11 @@ curl -sS -N -X POST http://127.0.0.1:18088/agent \
 
 Expect an SSE stream of `RUN_STARTED` → `TEXT_MESSAGE_START` →
 `TEXT_MESSAGE_CONTENT` → `TEXT_MESSAGE_END` → `RUN_FINISHED`, with the reply
-language matching the question. Asking the model to identify itself is not a
-reliable check — LLMs frequently hallucinate their identity; verify the model
-via the `model` field of a direct DeepSeek API response instead.
+language matching the question. To exercise the office tools, put a file in
+the workspace (for example `notes.txt`) and ask the agent to read it. Asking
+the model to identify itself is not a reliable check — LLMs frequently
+hallucinate their identity; verify the model via the `model` field of a
+direct DeepSeek API response instead.
 
 ## DeepAgents profiles
 
@@ -133,10 +146,12 @@ and [DeepAgents overview](https://docs.langchain.com/oss/python/deepagents/overv
 | File | Purpose |
 | --- | --- |
 | `.agentseek/lifecycle.toml` | Declares AgentSeek `info`, `doctor`, `dev`, and `task` behavior. |
-| `.env.example` | Documents runtime model, provider, LangChain binding, and AG-UI port variables. |
-| `src/office_agent/demo_binding.py` | Builds the DeepAgents runnable and exports `build_spec()`. |
+| `.env.example` | Documents runtime model, provider, LangChain binding, AG-UI port, and workspace variables. |
+| `src/office_agent/binding.py` | Builds the DeepAgents runnable and exports `build_spec()`. |
+| `src/office_agent/tools.py` | Office file tools with workspace confinement. |
 | `src/office_agent/settings.py` | Reads env vars; bridges `AGENTSEEK_*` into `OPENAI_*` when needed. |
 | `requirements.txt` | Extra Python dependencies. |
-| `tests/test_demo_binding.py` | Unit and stub-server integration tests for the binding. |
+| `tests/test_binding.py` | Unit and stub-server integration tests for the binding. |
+| `tests/test_tools.py` | Workspace confinement and tool behavior tests. |
 
 Author: Dino

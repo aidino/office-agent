@@ -9,7 +9,7 @@ guide = "README.md"
 required = ["uv"]
 
 [paths]
-required = ["pyproject.toml", "src/office_agent/demo_binding.py"]
+required = ["pyproject.toml", "src/office_agent/binding.py"]
 
 [env.BUB_MODEL]
 required = true

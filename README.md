@@ -1,6 +1,7 @@
 # office-agent
 
-Office Agent — a backend-only DeepAgents service (Python) exposed through an
+Office Agent — a backend-only office agent (Python, DeepAgents) that reads
+and writes documents, spreadsheets, and presentations, exposed through an
 AG-UI gateway on `http://127.0.0.1:18088/agent`. Defaults to the DeepSeek
 `deepseek-flash` model via DeepSeek's OpenAI-compatible endpoint.
 

@@ -5,26 +5,32 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
-from office_agent import demo_binding
-
+from office_agent import binding
+from office_agent.tools import OFFICE_TOOLS
 
 def test_build_agent_disables_responses_api_for_openai_provider(monkeypatch) -> None:
     registrations = []
+    harness_registrations = []
     captured = {}
 
     monkeypatch.setattr(
-        demo_binding,
+        binding,
         "register_provider_profile",
         lambda key, profile: registrations.append((key, profile)),
+    )
+    monkeypatch.setattr(
+        binding,
+        "register_harness_profile",
+        lambda key, profile: harness_registrations.append((key, profile)),
     )
 
     def fake_create_deep_agent(**kwargs):
         captured.update(kwargs)
         return "agent"
 
-    monkeypatch.setattr(demo_binding, "create_deep_agent", fake_create_deep_agent)
+    monkeypatch.setattr(binding, "create_deep_agent", fake_create_deep_agent)
     monkeypatch.setattr(
-        demo_binding,
+        binding,
         "get_settings",
         lambda: SimpleNamespace(
             require_model=lambda: "openai:glm-5.2",
@@ -32,13 +38,20 @@ def test_build_agent_disables_responses_api_for_openai_provider(monkeypatch) -> 
         ),
     )
 
-    assert demo_binding.build_agent() == "agent"
+    assert binding.build_agent() == "agent"
     assert len(registrations) == 1
     key, profile = registrations[0]
     assert key == "openai"
     assert profile.init_kwargs["use_responses_api"] is False
     assert captured["model"] == "openai:glm-5.2"
-    assert captured["tools"] == [demo_binding.outline_answer]
+    assert captured["tools"] == OFFICE_TOOLS
+    assert "Office Agent" in captured["system_prompt"]
+
+    assert len(harness_registrations) == 1
+    harness_key, harness_profile = harness_registrations[0]
+    assert harness_key == "openai"
+    assert "read_file" in harness_profile.excluded_tools
+    assert "execute" in harness_profile.excluded_tools
 
 
 def test_build_agent_uses_chat_completions_with_real_deepagents(monkeypatch) -> None:
@@ -80,9 +93,9 @@ def test_build_agent_uses_chat_completions_with_real_deepagents(monkeypatch) -> 
         monkeypatch.setenv("BUB_MODEL", "openai:test-model")
         monkeypatch.setenv("BUB_API_KEY", "dummy-key")
         monkeypatch.setenv("BUB_API_BASE", f"http://127.0.0.1:{server.server_port}/v1")
-        demo_binding.get_settings.cache_clear()
+        binding.get_settings.cache_clear()
 
-        agent = demo_binding.build_agent()
+        agent = binding.build_agent()
         result = agent.invoke({"messages": [{"role": "user", "content": "hello"}]})
 
         assert result["messages"][-1].content == "stub answer"
@@ -91,6 +104,6 @@ def test_build_agent_uses_chat_completions_with_real_deepagents(monkeypatch) -> 
         assert path == "/v1/chat/completions"
         assert payload["model"] == "test-model"
     finally:
-        demo_binding.get_settings.cache_clear()
+        binding.get_settings.cache_clear()
         server.shutdown()
         thread.join(timeout=5)
