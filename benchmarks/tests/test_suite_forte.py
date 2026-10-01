@@ -132,3 +132,51 @@ def test_evaluate_grader_missing_fails_cleanly(tmp_path: Path) -> None:
     result = suite.evaluate(task, tmp_path, _make_output())
     assert result.passed is False
     assert "grade" in result.notes.lower()
+
+
+def test_evaluate_llm_judge_delegates_to_judge_backend(
+    suite: ForteSuite, tmp_path: Path
+) -> None:
+    """llm_judge grading type must delegate rubrics to the LLM judge."""
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "finance-001")
+    assert t.metadata["grading_type"] == "llm_judge"
+
+    # Inject a mock judge that always passes
+    from unittest.mock import MagicMock
+    from office_bench.judges.base import RubricResult
+
+    mock_judge = MagicMock()
+    mock_judge.name = "llm:test-model"
+    mock_judge.judge_rubric.return_value = RubricResult(
+        rubric_id="01", passed=True, confidence=0.95, reason="ok"
+    )
+    suite._judge = mock_judge  # type: ignore[attr-defined]
+
+    result = suite.evaluate(t, tmp_path, _make_output())
+    assert mock_judge.judge_rubric.call_count == 2  # two rubrics
+    assert result.judge_backend == "llm:test-model"
+    assert result.passed is True
+    assert result.score == 1.0
+
+
+def test_evaluate_llm_judge_fails_when_rubric_fails(
+    suite: ForteSuite, tmp_path: Path
+) -> None:
+    """If LLM judge fails a rubric, the task must fail."""
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "finance-001")
+
+    from unittest.mock import MagicMock
+    from office_bench.judges.base import RubricResult
+
+    mock_judge = MagicMock()
+    mock_judge.name = "llm:test-model"
+    mock_judge.judge_rubric.return_value = RubricResult(
+        rubric_id="01", passed=False, confidence=0.3, reason="wrong"
+    )
+    suite._judge = mock_judge  # type: ignore[attr-defined]
+
+    result = suite.evaluate(t, tmp_path, _make_output())
+    assert result.passed is False
+    assert result.score == 0.0
