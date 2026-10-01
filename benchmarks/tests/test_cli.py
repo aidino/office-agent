@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import builtins
 import csv
+import importlib
 import json
 import subprocess
 import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -294,3 +297,68 @@ def test_compare_missing_second_run_fails(capsys, tmp_path: Path) -> None:
         ret = main(["compare", "--runs", "run1", "run2"])
     assert ret == 1
     assert "run2" in capsys.readouterr().err
+
+
+# --- registry wiring & module entry point (coverage gaps) ---
+
+
+def _install_fake_adapter(
+    monkeypatch: pytest.MonkeyPatch, module_name: str, cls_name: str
+) -> None:
+    """Stand in for a suite adapter module before Tasks 7-10 land it."""
+    module = types.ModuleType(module_name)
+
+    def _init(self: object, repo_dir: Path) -> None:
+        self.repo_dir = repo_dir  # type: ignore[attr-defined]
+
+    setattr(module, cls_name, type(cls_name, (), {"__init__": _init}))
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+
+def test_build_suite_registry_discovers_all_adapters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each adapter is lazily imported and bound to its repo dir under
+    data/benchmarks/ (global constraint: fixed submodule paths)."""
+    from office_bench.cli import DATA_BASE, _build_suite_registry
+
+    _install_fake_adapter(monkeypatch, "office_bench.suites.officebench", "OfficeBenchSuite")
+    _install_fake_adapter(monkeypatch, "office_bench.suites.pptc", "PPTCSuite")
+    _install_fake_adapter(monkeypatch, "office_bench.suites.spreadsheet", "SpreadsheetSuite")
+    _install_fake_adapter(monkeypatch, "office_bench.suites.forte", "ForteSuite")
+
+    registry = _build_suite_registry()
+
+    assert set(registry) == {"officebench", "pptc", "spreadsheet", "forte"}
+    assert registry["officebench"].repo_dir == DATA_BASE / "OfficeBench"  # type: ignore[attr-defined]
+    assert registry["pptc"].repo_dir == DATA_BASE / "PPTC"  # type: ignore[attr-defined]
+    assert registry["spreadsheet"].repo_dir == DATA_BASE / "SpreadsheetBench-2"  # type: ignore[attr-defined]
+    assert registry["forte"].repo_dir == DATA_BASE / "FORTE"  # type: ignore[attr-defined]
+
+
+def test_build_suite_registry_empty_when_adapters_unimportable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ImportError per adapter degrades to an empty registry, not a crash."""
+    from office_bench.cli import _build_suite_registry
+
+    real_import = builtins.__import__
+
+    def _failing_import(name, *args, **kwargs):
+        if name.startswith("office_bench.suites."):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _failing_import)
+    assert _build_suite_registry() == {}
+
+
+def test_dunder_main_forwards_cli_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`python -m office_bench` exits with main()'s return code."""
+    monkeypatch.delitem(sys.modules, "office_bench.__main__", raising=False)
+    with patch("office_bench.cli.main", return_value=3):
+        with pytest.raises(SystemExit) as exc_info:
+            importlib.import_module("office_bench.__main__")
+    assert exc_info.value.code == 3
