@@ -1,7 +1,5 @@
 # Office Agent Benchmark Harness Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build `office_bench`, a standalone CLI harness that runs Office Agent against four external benchmark suites (FORTE, OfficeBench, SpreadsheetBench 2, PPTC), persists results as JSON + backdata CSV, and generates Markdown comparison reports.
 
 **Architecture:** A standalone Python package (`benchmarks/`) separate from the main `office_agent/` package. Each benchmark suite is a pluggable adapter implementing a `Suite` protocol. A single `AgentBridge` calls the existing AG-UI SSE gateway. A `Runner` orchestrates load → run → evaluate → persist. CLI is built with `argparse`.
@@ -15,9 +13,11 @@
 - Python ≥ 3.12
 - All data types are frozen dataclasses (immutable)
 - No modifications to benchmark submodule source code
-- No modifications to existing `office_agent/` source
+- `office_agent/` source is unchanged EXCEPT the per-request workspace binding in Task 2 (`binding.py` only)
+- Per-task workspace is delivered inside the AG-UI payload as `state._runtime_workspace` (agentseek-native mechanism — see Task 2); never via client-side env vars
+- Multi-turn tasks advertise their turns via `Task.metadata["turn_prompts"]: list[str]`; the Runner calls `bridge.run_session()` when it has more than one entry
 - Sequential execution only — no parallelism
-- Append-only backdata CSV — never rewrite existing rows
+- Append-only backdata CSV — never rewrite existing rows; on resume, skip the append when a row for (run_id, suite) already exists
 - All file paths in results are relative to project root
 - Benchmark submodule repos at `data/benchmarks/{FORTE,OfficeBench,SpreadsheetBench-2,PPTC}`
 - HuggingFace downloads gitignored at `data/benchmarks/datasets/`
@@ -26,13 +26,14 @@
 
 ---
 
-### Task 1: Project Scaffold & Shared Data Types
+### Task 1: Project Scaffold &amp; Shared Data Types
 
 Set up the `benchmarks/` Python package with `pyproject.toml`, shared data
 types used by every subsequent task, and the Suite protocol. This is the
 foundation everything imports from.
 
 **Files:**
+
 - Create: `benchmarks/pyproject.toml`
 - Create: `benchmarks/src/office_bench/__init__.py`
 - Create: `benchmarks/src/office_bench/suites/__init__.py`
@@ -44,6 +45,7 @@ foundation everything imports from.
 - Modify: `.gitignore` (append benchmark-specific ignores)
 
 **Interfaces:**
+
 - Consumes: nothing (first task)
 - Produces:
   - `office_bench.suites.base.Task` — frozen dataclass with fields: `suite: str`, `task_id: str`, `prompt: str`, `category: str`, `input_files: list[Path]`, `metadata: dict`
@@ -57,7 +59,9 @@ foundation everything imports from.
 
 **DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_data_types.py -v` passes. All dataclasses are frozen, constructible, and have correct field types. Protocol classes importable.
 
-- [ ] **Step 1: Create `benchmarks/pyproject.toml`**
+
+
+- [x] **Step 1: Create `benchmarks/pyproject.toml`**
 
 ```toml
 [project]
@@ -88,13 +92,17 @@ package-dir = {"" = "src"}
 where = ["src"]
 ```
 
-- [ ] **Step 2: Create `benchmarks/src/office_bench/__init__.py`**
+
+
+- [x] **Step 2: Create `benchmarks/src/office_bench/__init__.py`**
 
 ```python
 """Office Agent Benchmark Harness."""
 ```
 
-- [ ] **Step 3: Write the failing test for data types**
+
+
+- [x] **Step 3: Write the failing test for data types**
 
 Create `benchmarks/tests/__init__.py` (empty) and `benchmarks/tests/test_data_types.py`:
 
@@ -268,7 +276,9 @@ def test_judge_backend_protocol() -> None:
     assert result.confidence == 0.9
 ```
 
-- [ ] **Step 4: Run test to verify it fails**
+
+
+- [x] **Step 4: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_data_types.py -v
@@ -276,13 +286,17 @@ cd benchmarks && uv run pytest tests/test_data_types.py -v
 
 Expected: FAIL — modules `office_bench.suites.base` and `office_bench.judges.base` not found.
 
-- [ ] **Step 5: Implement `benchmarks/src/office_bench/suites/__init__.py`**
+
+
+- [x] **Step 5: Implement `benchmarks/src/office_bench/suites/__init__.py`**
 
 ```python
 """Benchmark suite adapters."""
 ```
 
-- [ ] **Step 6: Implement `benchmarks/src/office_bench/suites/base.py`**
+
+
+- [x] **Step 6: Implement `benchmarks/src/office_bench/suites/base.py`**
 
 ```python
 """Shared data types and Suite protocol for all benchmark adapters."""
@@ -346,13 +360,17 @@ class Suite(Protocol):
     ) -> TaskResult: ...
 ```
 
-- [ ] **Step 7: Implement `benchmarks/src/office_bench/judges/__init__.py`**
+
+
+- [x] **Step 7: Implement `benchmarks/src/office_bench/judges/__init__.py`**
 
 ```python
 """Judge backends for LLM and deterministic evaluation."""
 ```
 
-- [ ] **Step 8: Implement `benchmarks/src/office_bench/judges/base.py`**
+
+
+- [x] **Step 8: Implement `benchmarks/src/office_bench/judges/base.py`**
 
 ```python
 """Judge data types and JudgeBackend protocol."""
@@ -402,7 +420,9 @@ class JudgeBackend(Protocol):
     def judge_rubric(self, rubric: Rubric, context: JudgeContext) -> RubricResult: ...
 ```
 
-- [ ] **Step 9: Append to `.gitignore`**
+
+
+- [x] **Step 9: Append to `.gitignore`**
 
 Add to the end of `.gitignore`:
 
@@ -414,7 +434,9 @@ data/benchmarks/PPTC/PPT_label_*
 results/benchmarks/*/workspaces/
 ```
 
-- [ ] **Step 10: Run test to verify it passes**
+
+
+- [x] **Step 10: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_data_types.py -v
@@ -422,7 +444,9 @@ cd benchmarks && uv run pytest tests/test_data_types.py -v
 
 Expected: all 9 tests PASS.
 
-- [ ] **Step 11: Commit**
+
+
+- [x] **Step 11: Commit**
 
 ```bash
 git add benchmarks/ .gitignore
@@ -431,24 +455,271 @@ git commit -m "feat(bench): scaffold benchmarks package with shared data types a
 
 ---
 
-### Task 2: Agent Bridge (AG-UI SSE Client)
+### Task 2: Per-Request Workspace Binding (office_agent gateway)
+
+**Code-review finding (2026-10-01):** client-side workspace isolation cannot
+work. `office_agent`'s tools resolve the workspace from
+`OFFICE_AGENT_WORKSPACE` in the **gateway process env**
+(`office_agent/src/office_agent/tools.py` → `workspace_root()` reads it at
+call time inside the server), so setting it in the benchmark client is a
+no-op — every benchmark task would run in the gateway's CWD and score ~0 for
+the wrong reason.
+
+The agentseek stack already carries a per-request workspace end-to-end; only
+the last link is missing:
+
+1. AG-UI request `state._runtime_workspace` → `AGUIPlugin.load_state` copies
+   the input state dict into the session state (`agentseek_ag_ui/plugin.py`).
+2. `LangChainRunnablePlugin._build_context` reads `state["_runtime_workspace"]`
+   → `InvocationContext.workspace` (`agentseek_langchain/plugin.py`).
+3. `messages_spec` builds config via `default_runnable_config`, which writes
+   `str(context.workspace)` into `config["metadata"]["workspace"]` and passes
+   `config` to the runnable (`agentseek_langchain/spec.py`).
+
+Fix: wrap the agent runnable in `binding.py` so each invocation exports that
+workspace into `OFFICE_AGENT_WORKSPACE` for the duration of the call. The env
+var is process-global, which is safe for our sequential single-instance
+benchmark runs and avoids contextvar propagation issues across LangGraph
+worker threads; the wrapper restores the previous value afterwards.
+
+**Files:**
+
+- Modify: `office_agent/src/office_agent/binding.py` — add `WorkspaceScopedRunnable`, wrap it in `build_spec()`
+- Create: `office_agent/tests/test_workspace_binding.py`
+
+**Interfaces:**
+
+- Consumes: `config["metadata"]["workspace"]` set by agentseek's `default_runnable_config`
+- Produces:
+  - `office_agent.binding.WorkspaceScopedRunnable(inner)` — proxy exposing `invoke`/`ainvoke(runnable_input, /, **kwargs)` (satisfies agentseek's `SyncRunnable`/`AsyncRunnable` protocols because it accepts `**kwargs`)
+  - For the duration of each call it sets `OFFICE_AGENT_WORKSPACE` from `config["metadata"]["workspace"]`, then restores the previous value
+  - `office_agent.binding.build_spec()` returns `messages_spec(WorkspaceScopedRunnable(build_agent()), include_agents_md=True)`
+
+**DoD:** `cd office_agent && uv run pytest tests/test_workspace_binding.py tests/test_binding.py tests/test_tools.py -v` passes. The wrapper sets the env var when `config.metadata.workspace` is present, leaves it untouched when absent, restores the previous value after the call. Existing binding/tools tests stay green.
+
+
+
+- [ ] **Step 1: Write the failing test**
+
+Create `office_agent/tests/test_workspace_binding.py`:
+
+```python
+from __future__ import annotations
+
+import asyncio
+import os
+
+from office_agent.binding import WorkspaceScopedRunnable
+from office_agent.tools import WORKSPACE_ENV
+
+
+class _AsyncRecorder:
+    """Stub runnable that records the workspace env at call time."""
+
+    def __init__(self) -> None:
+        self.seen: list[str | None] = []
+
+    async def ainvoke(self, runnable_input, /, **kwargs):
+        self.seen.append(os.environ.get(WORKSPACE_ENV))
+        return "done"
+
+
+class _SyncRecorder:
+    def __init__(self) -> None:
+        self.seen: list[str | None] = []
+
+    def invoke(self, runnable_input, /, **kwargs):
+        self.seen.append(os.environ.get(WORKSPACE_ENV))
+        return "done"
+
+
+def _config(workspace: str | None) -> dict:
+    metadata = {} if workspace is None else {"workspace": workspace}
+    return {"metadata": metadata}
+
+
+def test_ainvoke_sets_workspace_from_config_metadata(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    inner = _AsyncRecorder()
+    wrapped = WorkspaceScopedRunnable(inner)
+
+    result = asyncio.run(
+        wrapped.ainvoke({"messages": []}, config=_config(str(tmp_path)))
+    )
+
+    assert result == "done"
+    assert inner.seen == [str(tmp_path)]
+    assert WORKSPACE_ENV not in os.environ  # restored afterwards
+
+
+def test_ainvoke_without_workspace_leaves_env_untouched(monkeypatch) -> None:
+    monkeypatch.setenv(WORKSPACE_ENV, "/srv/default")
+    inner = _AsyncRecorder()
+    wrapped = WorkspaceScopedRunnable(inner)
+
+    asyncio.run(wrapped.ainvoke({"messages": []}, config=_config(None)))
+
+    assert inner.seen == ["/srv/default"]
+    assert os.environ[WORKSPACE_ENV] == "/srv/default"
+
+
+def test_sync_invoke_sets_workspace(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv(WORKSPACE_ENV, raising=False)
+    inner = _SyncRecorder()
+    wrapped = WorkspaceScopedRunnable(inner)
+
+    out = wrapped.invoke({"messages": []}, config=_config(str(tmp_path)))
+
+    assert out == "done"
+    assert inner.seen == [str(tmp_path)]
+    assert WORKSPACE_ENV not in os.environ
+
+
+def test_restores_previous_value(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv(WORKSPACE_ENV, "/srv/old")
+    inner = _AsyncRecorder()
+    wrapped = WorkspaceScopedRunnable(inner)
+
+    asyncio.run(wrapped.ainvoke({"messages": []}, config=_config(str(tmp_path))))
+
+    assert inner.seen == [str(tmp_path)]
+    assert os.environ[WORKSPACE_ENV] == "/srv/old"
+```
+
+
+
+- [ ] **Step 2: Run test to verify it fails**
+
+```bash
+cd office_agent && uv run pytest tests/test_workspace_binding.py -v
+```
+
+Expected: FAIL — `ImportError: cannot import name 'WorkspaceScopedRunnable'`.
+
+
+
+- [ ] **Step 3: Implement the wrapper in `office_agent/src/office_agent/binding.py`**
+
+Add the imports and the proxy class, then wrap the agent in `build_spec()`:
+
+```python
+import os
+from contextlib import contextmanager
+
+from .tools import WORKSPACE_ENV
+
+
+class WorkspaceScopedRunnable:
+    """Export the per-request workspace into OFFICE_AGENT_WORKSPACE.
+
+    agentseek's ``default_runnable_config`` puts the per-request workspace
+    (from the AG-UI ``state._runtime_workspace``) into
+    ``config["metadata"]["workspace"]``. The office tools read the env var at
+    call time, so export it for the duration of one invocation and restore
+    the previous value afterwards. Process-global env is safe here: benchmark
+    runs are sequential against a single-instance gateway.
+    """
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    async def ainvoke(self, runnable_input: Any, /, **kwargs: Any) -> Any:
+        with self._scoped_workspace(kwargs.get("config")):
+            return await self._inner.ainvoke(runnable_input, **kwargs)
+
+    def invoke(self, runnable_input: Any, /, **kwargs: Any) -> Any:
+        with self._scoped_workspace(kwargs.get("config")):
+            return self._inner.invoke(runnable_input, **kwargs)
+
+    @staticmethod
+    @contextmanager
+    def _scoped_workspace(config: Any):
+        metadata = (config or {}).get("metadata") or {}
+        workspace = metadata.get("workspace")
+        if not isinstance(workspace, str) or not workspace:
+            yield
+            return
+        previous = os.environ.get(WORKSPACE_ENV)
+        os.environ[WORKSPACE_ENV] = workspace
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop(WORKSPACE_ENV, None)
+            else:
+                os.environ[WORKSPACE_ENV] = previous
+```
+
+```python
+def build_spec():
+    """Return a RunnableSpec for AGENTSEEK_LANGCHAIN_SPEC."""
+
+    return messages_spec(
+        WorkspaceScopedRunnable(build_agent()), include_agents_md=True
+    )
+```
+
+
+
+- [ ] **Step 4: Run all office_agent tests**
+
+```bash
+cd office_agent && uv run pytest tests/ -v
+```
+
+Expected: all tests PASS — including the existing `test_binding.py` and `test_tools.py`.
+
+
+
+- [ ] **Step 5: Manual end-to-end verification against the live gateway**
+
+```bash
+mkdir -p /tmp/bench_probe && touch /tmp/bench_probe/marker.txt
+# terminal 1
+cd office_agent && uv run bub gateway --enable-channel ag-ui
+# terminal 2
+curl -sS -N -X POST http://127.0.0.1:18088/agent \
+  -H 'Content-Type: application/json' \
+  -d '{"threadId":"ws-probe","runId":"r1","messages":[{"id":"m1","role":"user","content":"List the files in the workspace."}],"state":{"_runtime_workspace":"/tmp/bench_probe"},"tools":[],"context":[],"forwardedProps":{}}'
+```
+
+The agent must report `marker.txt` — proving the per-request workspace binding
+works end to end (tools confined to `/tmp/bench_probe`, not the gateway CWD).
+
+
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add office_agent/src/office_agent/binding.py office_agent/tests/test_workspace_binding.py
+git commit -m "feat(agent): bind per-request workspace from AG-UI state into office tools"
+```
+
+---
+
+### Task 3: Agent Bridge (AG-UI SSE Client)
 
 Build the `AgentBridge` that connects the harness to Office Agent via the
 existing AG-UI SSE gateway. Handles single-turn and multi-turn flows, SSE
 event parsing, workspace isolation, and timeouts.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/agent_bridge.py`
 - Create: `benchmarks/tests/test_agent_bridge.py`
 
 **Interfaces:**
+
 - Consumes: `office_bench.suites.base.AgentOutput` from Task 1
+- Consumes: per-request workspace mechanism from Task 2 — every request carries `state._runtime_workspace`
 - Produces:
   - `office_bench.agent_bridge.AgentBridge.__init__(gateway_url: str = "http://127.0.0.1:18088/agent", timeout_seconds: int = 600)`
   - `office_bench.agent_bridge.AgentBridge.run_task(prompt: str, workspace_dir: Path) -> AgentOutput`
   - `office_bench.agent_bridge.AgentBridge.run_session(prompts: list[str], workspace_dir: Path) -> AgentOutput`
 
 **DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_agent_bridge.py -v` passes. Tests use a mock HTTP server returning realistic SSE events. Both single-turn and multi-turn paths are covered, plus error and timeout scenarios.
+
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -552,6 +823,8 @@ def test_run_task_single_turn(sse_server, tmp_path: Path) -> None:
     assert "threadId" in req
     assert req["messages"][0]["role"] == "user"
     assert req["messages"][0]["content"] == "Hello"
+    # Per-task workspace must travel in the payload (Task 2 mechanism)
+    assert req["state"]["_runtime_workspace"] == str(tmp_path)
 
 
 def test_run_task_scans_workspace_files(sse_server, tmp_path: Path) -> None:
@@ -593,9 +866,17 @@ def test_run_session_multi_turn(sse_server, tmp_path: Path) -> None:
     assert len(second_req["messages"]) >= 2
     # Same threadId across turns
     assert SSEHandler.request_log[0]["threadId"] == SSEHandler.request_log[1]["threadId"]
+    # Same workspace across turns
+    assert (
+        SSEHandler.request_log[0]["state"]["_runtime_workspace"]
+        == SSEHandler.request_log[1]["state"]["_runtime_workspace"]
+        == str(tmp_path)
+    )
     # Output merges all turns
     assert output.duration_seconds >= 0
 ```
+
+
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -605,6 +886,8 @@ cd benchmarks && uv run pytest tests/test_agent_bridge.py -v
 
 Expected: FAIL — `office_bench.agent_bridge` not found.
 
+
+
 - [ ] **Step 3: Implement `benchmarks/src/office_bench/agent_bridge.py`**
 
 ```python
@@ -613,7 +896,6 @@ Expected: FAIL — `office_bench.agent_bridge` not found.
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
 from pathlib import Path
@@ -634,17 +916,12 @@ class AgentBridge:
         self._gateway_url = gateway_url
         self._timeout_seconds = timeout_seconds
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def run_task(self, prompt: str, workspace_dir: Path) -> AgentOutput:
         """Execute a single-turn agent task and return captured output."""
         thread_id = f"bench-{uuid.uuid4().hex[:12]}"
         run_id = f"run-{uuid.uuid4().hex}"
 
         snapshot_before = self._snapshot_files(workspace_dir)
-
         messages = [{"id": "m1", "role": "user", "content": prompt}]
         result = self._call_gateway(thread_id, run_id, messages, workspace_dir)
 
@@ -666,7 +943,6 @@ class AgentBridge:
         all_messages: list[dict] = []
         all_tool_calls: list[dict] = []
         total_duration = 0.0
-
         snapshot_before = self._snapshot_files(workspace_dir)
         history: list[dict] = []
 
@@ -675,281 +951,7 @@ class AgentBridge:
             user_msg = {"id": f"m{i * 2 + 1}", "role": "user", "content": prompt}
             history.append(user_msg)
 
-            result = self._call_gateway(
-                thread_id, run_id, list(history), workspace_dir
-            )
-            total_duration += result["duration"]
-            all_tool_calls.extend(result["tool_calls"])
-
-            for msg in result["messages"]:
-                all_messages.append(msg)
-                history.append(
-                    {
-                        "id": f"m{i * 2 + 2}",
-                        "role": "assistant",
-                        "content": msg.get("content", ""),
-                    }
-                )
-
-        snapshot_after = self._snapshot_files(workspace_dir)
-        new_files = sorted(snapshot_after - snapshot_before)
-
-        return AgentOutput(
-            messages=all_messages,
-            files_created=[Path(f) for f in new_files],
-            tool_calls=all_tool_calls,
-            duration_seconds=total_duration,
-        )
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _call_gateway(
-        self,
-        thread_id: str,
-        run_id: str,
-        messages: list[dict],
-        workspace_dir: Path,
-    ) -> dict:
-        """POST to the AG-UI gateway and parse the SSE stream."""
-        payload = {
-            "threadId": thread_id,
-            "runId": run_id,
-            "messages": messages,
-            "state": None,
-            "tools": [],
-            "context": [],
-            "forwardedProps": {},
-        }
-
-        env = os.environ.copy()
-        env["OFFICE_AGENT_WORKSPACE"] = str(workspace_dir)
-
-        start = time.monotonic()
-        resp = requests.post(
-            self._gateway_url,
-            json=payload,
-            headers={"Accept": "text/event-stream"},
-            stream=True,
-            timeout=self._timeout_seconds,
-        )
-        resp.raise_for_status()
-
-        collected_messages: list[dict] = []
-        tool_calls: list[dict] = []
-        text_buffer = ""
-        active_tool_calls: dict[str, dict] = {}
-
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            if line.startswith("event: "):
-                event_type = line[7:].strip()
-            elif line.startswith("data: "):
-                raw = line[6:]
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                self._handle_event(
-                    event_type,
-                    data,
-                    text_buffer_ref={"buf": text_buffer},
-                    collected_messages=collected_messages,
-                    tool_calls=tool_calls,
-                    active_tool_calls=active_tool_calls,
-                )
-                text_buffer = text_buffer_ref_value = ""  # noqa: F841
-
-        # Flush any remaining text
-        duration = time.monotonic() - start
-
-        # Re-parse to handle the accumulation correctly
-        # (the above loop is simplified; let's use a cleaner approach)
-        return self._parse_sse_stream(resp, start, workspace_dir)
-
-    def _parse_sse_stream(
-        self, resp: requests.Response, start: float, workspace_dir: Path
-    ) -> dict:
-        """Parse an SSE response into structured output."""
-        # Response is already consumed; re-read from the raw content
-        # Since iter_lines consumes, we rebuild from content
-        # This is called from a refactored _call_gateway below.
-        raise NotImplementedError  # replaced by inline parsing
-
-    def _call_gateway(
-        self,
-        thread_id: str,
-        run_id: str,
-        messages: list[dict],
-        workspace_dir: Path,
-    ) -> dict:
-        """POST to the AG-UI gateway and parse the SSE stream."""
-        payload = {
-            "threadId": thread_id,
-            "runId": run_id,
-            "messages": messages,
-            "state": None,
-            "tools": [],
-            "context": [],
-            "forwardedProps": {},
-        }
-
-        start = time.monotonic()
-        resp = requests.post(
-            self._gateway_url,
-            json=payload,
-            headers={"Accept": "text/event-stream"},
-            stream=True,
-            timeout=self._timeout_seconds,
-        )
-        resp.raise_for_status()
-
-        collected_messages: list[dict] = []
-        tool_calls: list[dict] = []
-        text_parts: list[str] = []
-        active_tools: dict[str, dict] = {}
-        event_type = ""
-
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            if line.startswith("event: "):
-                event_type = line[7:].strip()
-                continue
-            if not line.startswith("data: "):
-                continue
-
-            try:
-                data = json.loads(line[6:])
-            except json.JSONDecodeError:
-                continue
-
-            if event_type == "TEXT_MESSAGE_CONTENT":
-                text_parts.append(data.get("delta", ""))
-
-            elif event_type == "TOOL_CALL_START":
-                tc_id = data.get("toolCallId", "")
-                active_tools[tc_id] = {
-                    "name": data.get("toolName", ""),
-                    "args": "",
-                }
-
-            elif event_type == "TOOL_CALL_ARGS":
-                tc_id = data.get("toolCallId", "")
-                if tc_id in active_tools:
-                    active_tools[tc_id]["args"] += data.get("delta", "")
-
-            elif event_type == "TOOL_CALL_END":
-                tc_id = data.get("toolCallId", "")
-                if tc_id in active_tools:
-                    tc = active_tools.pop(tc_id)
-                    try:
-                        args = json.loads(tc["args"]) if tc["args"] else {}
-                    except json.JSONDecodeError:
-                        args = {"raw": tc["args"]}
-                    tool_calls.append({"name": tc["name"], "args": args})
-
-            elif event_type == "RUN_FINISHED":
-                break
-
-            elif event_type == "RUN_ERROR":
-                error_msg = data.get("error", "Unknown error")
-                collected_messages.append(
-                    {"role": "assistant", "content": f"[ERROR] {error_msg}"}
-                )
-                break
-
-        duration = time.monotonic() - start
-
-        if text_parts:
-            collected_messages.append(
-                {"role": "assistant", "content": "".join(text_parts)}
-            )
-
-        return {
-            "messages": collected_messages,
-            "tool_calls": tool_calls,
-            "duration": duration,
-        }
-
-    @staticmethod
-    def _snapshot_files(directory: Path) -> set[str]:
-        """Return relative paths of all files under *directory*."""
-        if not directory.exists():
-            return set()
-        return {
-            str(p.relative_to(directory))
-            for p in directory.rglob("*")
-            if p.is_file()
-        }
-```
-
-Wait — that has a duplicate `_call_gateway`. Let me provide the clean version:
-
-```python
-"""AG-UI SSE client that bridges the benchmark harness to Office Agent."""
-
-from __future__ import annotations
-
-import json
-import time
-import uuid
-from pathlib import Path
-
-import requests
-
-from office_bench.suites.base import AgentOutput
-
-
-class AgentBridge:
-    """Single integration point between the harness and Office Agent."""
-
-    def __init__(
-        self,
-        gateway_url: str = "http://127.0.0.1:18088/agent",
-        timeout_seconds: int = 600,
-    ) -> None:
-        self._gateway_url = gateway_url
-        self._timeout_seconds = timeout_seconds
-
-    def run_task(self, prompt: str, workspace_dir: Path) -> AgentOutput:
-        """Execute a single-turn agent task and return captured output."""
-        thread_id = f"bench-{uuid.uuid4().hex[:12]}"
-        run_id = f"run-{uuid.uuid4().hex}"
-
-        snapshot_before = self._snapshot_files(workspace_dir)
-        messages = [{"id": "m1", "role": "user", "content": prompt}]
-        result = self._call_gateway(thread_id, run_id, messages)
-
-        snapshot_after = self._snapshot_files(workspace_dir)
-        new_files = sorted(snapshot_after - snapshot_before)
-
-        return AgentOutput(
-            messages=result["messages"],
-            files_created=[Path(f) for f in new_files],
-            tool_calls=result["tool_calls"],
-            duration_seconds=result["duration"],
-        )
-
-    def run_session(
-        self, prompts: list[str], workspace_dir: Path
-    ) -> AgentOutput:
-        """Execute a multi-turn session, maintaining the same threadId."""
-        thread_id = f"bench-{uuid.uuid4().hex[:12]}"
-        all_messages: list[dict] = []
-        all_tool_calls: list[dict] = []
-        total_duration = 0.0
-        snapshot_before = self._snapshot_files(workspace_dir)
-        history: list[dict] = []
-
-        for i, prompt in enumerate(prompts):
-            run_id = f"run-{uuid.uuid4().hex}"
-            user_msg = {"id": f"m{i * 2 + 1}", "role": "user", "content": prompt}
-            history.append(user_msg)
-
-            result = self._call_gateway(thread_id, run_id, list(history))
+            result = self._call_gateway(thread_id, run_id, list(history), workspace_dir)
             total_duration += result["duration"]
             all_tool_calls.extend(result["tool_calls"])
 
@@ -972,14 +974,20 @@ class AgentBridge:
         )
 
     def _call_gateway(
-        self, thread_id: str, run_id: str, messages: list[dict]
+        self,
+        thread_id: str,
+        run_id: str,
+        messages: list[dict],
+        workspace_dir: Path,
     ) -> dict:
         """POST to the AG-UI gateway and parse the SSE event stream."""
         payload = {
             "threadId": thread_id,
             "runId": run_id,
             "messages": messages,
-            "state": None,
+            # Per-request workspace (Task 2): agentseek copies this into the
+            # session state and the binding exports it to the office tools.
+            "state": {"_runtime_workspace": str(workspace_dir)},
             "tools": [],
             "context": [],
             "forwardedProps": {},
@@ -1070,6 +1078,8 @@ class AgentBridge:
         }
 ```
 
+
+
 - [ ] **Step 4: Run test to verify it passes**
 
 ```bash
@@ -1077,6 +1087,8 @@ cd benchmarks && uv run pytest tests/test_agent_bridge.py -v
 ```
 
 Expected: all 4 tests PASS.
+
+
 
 - [ ] **Step 5: Commit**
 
@@ -1087,18 +1099,20 @@ git commit -m "feat(bench): add AgentBridge AG-UI SSE client with single/multi-t
 
 ---
 
-### Task 3: Results Persistence & Backdata CSV
+### Task 4: Results Persistence &amp; Backdata CSV
 
 Build the results layer: save per-task JSON, aggregate metrics, append to
 backdata CSV, and generate Markdown reports. This task also creates the
 `results/benchmarks/` directory structure and the reference scores module.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/results.py`
 - Create: `benchmarks/src/office_bench/reference.py`
 - Create: `benchmarks/tests/test_results.py`
 
 **Interfaces:**
+
 - Consumes: `TaskResult` from Task 1
 - Produces:
   - `office_bench.results.save_task_result(run_dir: Path, result: TaskResult, run_number: int, agent_output: AgentOutput) -> Path` — writes `<suite>/<task_id>_run<N>.json`, returns path
@@ -1106,11 +1120,14 @@ backdata CSV, and generate Markdown reports. This task also creates the
   - `office_bench.results.save_run_meta(run_dir: Path, meta: dict) -> Path` — writes `meta.json`
   - `office_bench.results.aggregate_suite(results: list[dict], suite_name: str) -> dict` — computes primary metric per suite
   - `office_bench.results.append_backdata(backdata_path: Path, row: dict) -> None` — append one CSV row, creating file with header if missing
+  - `office_bench.results.has_backdata_row(backdata_path: Path, run_id: str, suite: str) -> bool` — True if a row for (run_id, suite) already exists; keeps resume appends idempotent without rewriting the CSV
   - `office_bench.results.generate_report(run_dir: Path, aggregated: dict[str, dict], reference: dict) -> Path` — writes `report.md`
   - `office_bench.results.BackdataRow` — TypedDict with columns: `run_id`, `timestamp`, `git_commit`, `agent_version`, `model`, `suite`, `tasks_total`, `tasks_run`, `primary_metric`, `primary_value`, `secondary_metrics`
   - `office_bench.reference.REFERENCE_SCORES` — dict keyed by suite name, each value has `scores: dict[str, float]`, `source: str`
 
 **DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_results.py -v` passes. JSON round-trips correctly, CSV is append-only with correct headers, report.md contains run metadata and per-suite tables.
+
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1129,6 +1146,7 @@ from office_bench.results import (
     aggregate_suite,
     append_backdata,
     generate_report,
+    has_backdata_row,
     load_task_results,
     save_run_meta,
     save_task_result,
@@ -1233,6 +1251,10 @@ def test_aggregate_suite_forte_avg_at_n() -> None:
     assert agg["primary_metric"] == "avg_at_3"
     # t1 avg = 2/3, t2 avg = 0 → mean = 1/3 ≈ 33.33
     assert abs(agg["primary_value"] - 33.33) < 0.1
+    # tasks_run counts unique tasks, not task×run rows
+    assert agg["tasks_run"] == 2
+    assert agg["tasks_total"] == 2
+    assert agg["result_rows"] == 6
 
 
 def test_append_backdata_creates_with_header(tmp_path: Path) -> None:
@@ -1273,6 +1295,20 @@ def test_append_backdata_appends_without_rewriting(tmp_path: Path) -> None:
     assert len(lines) == 3  # header + 2 rows
 
 
+def test_has_backdata_row(tmp_path: Path) -> None:
+    csv_path = tmp_path / "backdata.csv"
+    row = {
+        "run_id": "run1", "timestamp": "", "git_commit": "", "agent_version": "",
+        "model": "", "suite": "forte", "tasks_total": 0, "tasks_run": 0,
+        "primary_metric": "", "primary_value": 0, "secondary_metrics": "",
+    }
+    assert has_backdata_row(csv_path, "run1", "forte") is False  # missing file
+    append_backdata(csv_path, row)
+    assert has_backdata_row(csv_path, "run1", "forte") is True
+    assert has_backdata_row(csv_path, "run1", "pptc") is False
+    assert has_backdata_row(csv_path, "run2", "forte") is False
+
+
 def test_generate_report_produces_markdown(run_dir: Path) -> None:
     save_task_result(
         run_dir, _make_result("t1", "officebench", True, 1.0), 1, _make_output()
@@ -1300,6 +1336,8 @@ def test_reference_scores_has_all_suites() -> None:
         assert "source" in info
 ```
 
+
+
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
@@ -1307,6 +1345,8 @@ cd benchmarks && uv run pytest tests/test_results.py -v
 ```
 
 Expected: FAIL — `office_bench.results` not found.
+
+
 
 - [ ] **Step 3: Implement `benchmarks/src/office_bench/reference.py`**
 
@@ -1352,6 +1392,8 @@ REFERENCE_SCORES: dict[str, dict] = {
     },
 }
 ```
+
+
 
 - [ ] **Step 4: Implement `benchmarks/src/office_bench/results.py`**
 
@@ -1480,8 +1522,10 @@ def _aggregate_forte(results: list[dict]) -> dict:
     return {
         "primary_metric": f"avg_at_{n}",
         "primary_value": round(overall, 2),
-        "tasks_run": len(results),
+        # unique tasks, not task×run rows, so reports never show "6/2 tasks"
+        "tasks_run": len(by_task),
         "tasks_total": len(by_task),
+        "result_rows": len(results),
     }
 
 
@@ -1508,6 +1552,17 @@ def append_backdata(backdata_path: Path, row: dict) -> None:
         if write_header:
             writer.writeheader()
         writer.writerow({col: row.get(col, "") for col in BACKDATA_COLUMNS})
+
+
+def has_backdata_row(backdata_path: Path, run_id: str, suite: str) -> bool:
+    """True if a row for (run_id, suite) already exists in the CSV."""
+    if not backdata_path.exists():
+        return False
+    with backdata_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            if row.get("run_id") == run_id and row.get("suite") == suite:
+                return True
+    return False
 
 
 def generate_report(
@@ -1565,13 +1620,17 @@ def generate_report(
     return path
 ```
 
+
+
 - [ ] **Step 5: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_results.py -v
 ```
 
-Expected: all 10 tests PASS.
+Expected: all 11 tests PASS.
+
+
 
 - [ ] **Step 6: Commit**
 
@@ -1582,28 +1641,32 @@ git commit -m "feat(bench): add results persistence, backdata CSV, report genera
 
 ---
 
-### Task 4: Runner Orchestrator
+### Task 5: Runner Orchestrator
 
 Build the `Runner` that ties together suites, bridge, and results: loads
 tasks, filters, runs agent, evaluates, persists, aggregates, and generates
 report.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/runner.py`
 - Create: `benchmarks/tests/test_runner.py`
 
 **Interfaces:**
+
 - Consumes:
   - `Suite` protocol from Task 1
-  - `AgentBridge.run_task(prompt, workspace_dir)` from Task 2
-  - `save_task_result(...)`, `load_task_results(...)`, `save_run_meta(...)`, `aggregate_suite(...)`, `append_backdata(...)`, `generate_report(...)` from Task 3
-  - `REFERENCE_SCORES` from Task 3
+  - `AgentBridge.run_task(prompt, workspace_dir)` and `AgentBridge.run_session(prompts, workspace_dir)` from Task 3
+  - `save_task_result(...)`, `load_task_results(...)`, `save_run_meta(...)`, `aggregate_suite(...)`, `append_backdata(...)`, `has_backdata_row(...)`, `generate_report(...)` from Task 4
+  - `REFERENCE_SCORES` from Task 4
 - Produces:
   - `office_bench.runner.RunConfig` — frozen dataclass: `suites: list[str]`, `runs: int`, `task_ids: list[str] | None`, `categories: list[str] | None`, `limit: int | None`, `keep_workspaces: bool`, `no_resume: bool`, `dual_judge: bool`, `gateway_url: str`, `timeout_seconds: int`
   - `office_bench.runner.Runner.__init__(config: RunConfig, suite_registry: dict[str, Suite])`
-  - `office_bench.runner.Runner.run(results_base: Path) -> Path` — returns run_dir
+  - `office_bench.runner.Runner.run(results_base: Path) -> Path` — returns run\_dir
 
-**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_runner.py -v` passes. Tests use a fake Suite and a mock bridge (no real agent). Verifies: task loading, filtering by task_id/category/limit, workspace creation+cleanup, result JSON saved per task, resume skips existing results, aggregation + backdata appended, report generated.
+**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_runner.py -v` passes. Tests use a fake Suite and a mock bridge (no real agent). Verifies: task loading, filtering by task\_id/category/limit, workspace creation+cleanup, result JSON saved per task, single-turn tasks call `run_task` while tasks with `metadata["turn_prompts"]` (>1 entry) call `run_session`, resume skips existing results WITHOUT appending a duplicate backdata row, aggregation + backdata appended with `model` and `agent_version` filled, report generated.
+
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1612,6 +1675,7 @@ Create `benchmarks/tests/test_runner.py`:
 ```python
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -1745,6 +1809,33 @@ def test_runner_multiple_runs(tmp_path: Path) -> None:
     assert len(result_files) == 6  # 2 tasks × 3 runs
 
 
+def test_runner_multiturn_uses_run_session(tmp_path: Path) -> None:
+    multi = Task(
+        suite="fakesuite",
+        task_id="m1",
+        prompt="Turn one",
+        category="cat-a",
+        input_files=[],
+        metadata={"turn_prompts": ["Turn one", "Turn two", "Turn three"]},
+    )
+    suite = FakeSuite(tasks=[multi])
+    bridge = _make_mock_bridge()
+    bridge.run_session.return_value = AgentOutput(
+        messages=[{"role": "assistant", "content": "done"}],
+        files_created=[],
+        tool_calls=[],
+        duration_seconds=3.0,
+    )
+    config = _default_config()
+    runner = Runner(config, {"fakesuite": suite}, bridge=bridge)
+    runner.run(tmp_path)
+
+    bridge.run_session.assert_called_once()
+    prompts_arg = bridge.run_session.call_args[0][0]
+    assert prompts_arg == ["Turn one", "Turn two", "Turn three"]
+    bridge.run_task.assert_not_called()
+
+
 def test_runner_resume_skips_existing(tmp_path: Path) -> None:
     suite = FakeSuite()
     bridge = _make_mock_bridge()
@@ -1759,6 +1850,10 @@ def test_runner_resume_skips_existing(tmp_path: Path) -> None:
     runner2 = Runner(config, {"fakesuite": suite}, bridge=bridge)
     runner2.run(tmp_path, run_id=run_dir.name)
     assert bridge.run_task.call_count == 0
+
+    # Resume must not append a duplicate backdata row (append-only CSV)
+    lines = (tmp_path / "backdata.csv").read_text().strip().split("\n")
+    assert len(lines) == 2  # header + 1 suite row, still
 
 
 def test_runner_generates_report(tmp_path: Path) -> None:
@@ -1783,6 +1878,10 @@ def test_runner_appends_backdata(tmp_path: Path) -> None:
     assert backdata.exists()
     lines = backdata.read_text().strip().split("\n")
     assert len(lines) == 2  # header + 1 suite row
+    with backdata.open() as f:
+        row = next(csv.DictReader(f))
+    assert row["model"] != ""  # spec §9.3 requires model + agent_version
+    assert row["agent_version"] != ""
 
 
 def test_runner_workspace_cleanup(tmp_path: Path) -> None:
@@ -1799,6 +1898,8 @@ def test_runner_workspace_cleanup(tmp_path: Path) -> None:
     assert True  # workspace cleanup is in tempdir, not observable here
 ```
 
+
+
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
@@ -1807,6 +1908,8 @@ cd benchmarks && uv run pytest tests/test_runner.py -v
 
 Expected: FAIL — `office_bench.runner` not found.
 
+
+
 - [ ] **Step 3: Implement `benchmarks/src/office_bench/runner.py`**
 
 ```python
@@ -1814,9 +1917,11 @@ Expected: FAIL — `office_bench.runner` not found.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1827,6 +1932,7 @@ from office_bench.results import (
     aggregate_suite,
     append_backdata,
     generate_report,
+    has_backdata_row,
     load_task_results,
     save_run_meta,
     save_task_result,
@@ -1879,6 +1985,8 @@ class Runner:
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "git_commit": self._git_commit(),
+            "agent_version": self._agent_version(),
+            "model": os.environ.get("BUB_MODEL", "deepseek-flash"),
             "suites": self._config.suites,
             "runs": self._config.runs,
         }
@@ -1898,23 +2006,26 @@ class Runner:
             agg = aggregate_suite(all_results, suite_name)
             aggregated[suite_name] = agg
 
-            # Append backdata row
-            append_backdata(
-                results_base / "backdata.csv",
-                {
-                    "run_id": run_id,
-                    "timestamp": meta["timestamp"],
-                    "git_commit": meta["git_commit"],
-                    "agent_version": "",
-                    "model": "",
-                    "suite": suite_name,
-                    "tasks_total": agg.get("tasks_total", 0),
-                    "tasks_run": agg.get("tasks_run", 0),
-                    "primary_metric": agg.get("primary_metric", ""),
-                    "primary_value": agg.get("primary_value", 0),
-                    "secondary_metrics": "{}",
-                },
-            )
+            # Append backdata row — idempotent on resume: never write a
+            # second row for the same (run_id, suite) in the append-only CSV
+            backdata_path = results_base / "backdata.csv"
+            if not has_backdata_row(backdata_path, run_id, suite_name):
+                append_backdata(
+                    backdata_path,
+                    {
+                        "run_id": run_id,
+                        "timestamp": meta["timestamp"],
+                        "git_commit": meta["git_commit"],
+                        "agent_version": meta["agent_version"],
+                        "model": meta["model"],
+                        "suite": suite_name,
+                        "tasks_total": agg.get("tasks_total", 0),
+                        "tasks_run": agg.get("tasks_run", 0),
+                        "primary_metric": agg.get("primary_metric", ""),
+                        "primary_value": agg.get("primary_value", 0),
+                        "secondary_metrics": "{}",
+                    },
+                )
 
         generate_report(run_dir, aggregated, REFERENCE_SCORES)
         return run_dir
@@ -1935,8 +2046,15 @@ class Runner:
                 workspace = Path(tempfile.mkdtemp(prefix=f"bench_{task.task_id}_"))
                 try:
                     suite.setup_workspace(task, workspace)
-                    prompt = suite.format_prompt(task)
-                    agent_output = self._bridge.run_task(prompt, workspace)
+                    turn_prompts = task.metadata.get("turn_prompts")
+                    if isinstance(turn_prompts, list) and len(turn_prompts) > 1:
+                        # Multi-turn session (e.g. PPTC): same thread, all turns
+                        agent_output = self._bridge.run_session(
+                            list(turn_prompts), workspace
+                        )
+                    else:
+                        prompt = suite.format_prompt(task)
+                        agent_output = self._bridge.run_task(prompt, workspace)
                     result = suite.evaluate(task, workspace, agent_output)
                     save_task_result(run_dir, result, run_num, agent_output)
                 finally:
@@ -1973,7 +2091,22 @@ class Runner:
             return result.stdout.strip() if result.returncode == 0 else ""
         except (OSError, subprocess.TimeoutExpired):
             return ""
+
+    @staticmethod
+    def _agent_version() -> str:
+        """Version of the office_agent package, from its pyproject.toml."""
+        # benchmarks/src/office_bench/runner.py → parents[3] is the repo root
+        pyproject = (
+            Path(__file__).resolve().parents[3] / "office_agent" / "pyproject.toml"
+        )
+        try:
+            with pyproject.open("rb") as f:
+                return str(tomllib.load(f)["project"]["version"])
+        except (OSError, KeyError, tomllib.TOMLDecodeError):
+            return ""
 ```
+
+
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -1981,7 +2114,9 @@ class Runner:
 cd benchmarks && uv run pytest tests/test_runner.py -v
 ```
 
-Expected: all 9 tests PASS.
+Expected: all 11 tests PASS.
+
+
 
 - [ ] **Step 5: Commit**
 
@@ -1992,27 +2127,31 @@ git commit -m "feat(bench): add Runner orchestrator with filtering, resume, and 
 
 ---
 
-### Task 5: CLI Interface
+### Task 6: CLI Interface
 
 Build the `cli.py` module implementing all six CLI commands: `setup`, `list`,
 `run`, `report`, `trend`, `compare`. Uses `argparse`. Wires together Runner,
 results, and (in future tasks) real suite adapters.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/cli.py`
 - Create: `benchmarks/src/office_bench/__main__.py`
 - Create: `benchmarks/tests/test_cli.py`
 
 **Interfaces:**
+
 - Consumes:
-  - `RunConfig`, `Runner` from Task 4
-  - `load_task_results(...)`, `generate_report(...)`, `append_backdata(...)` from Task 3
-  - `REFERENCE_SCORES` from Task 3
+  - `RunConfig`, `Runner` from Task 5
+  - `load_task_results(...)`, `generate_report(...)`, `append_backdata(...)` from Task 4
+  - `REFERENCE_SCORES` from Task 4
 - Produces:
   - `office_bench.cli.main(argv: list[str] | None = None) -> int` — CLI entry point
   - `python -m office_bench <command>` — runnable via `__main__.py`
 
 **DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_cli.py -v` passes. Tests verify: `list` outputs task info to stdout, `run` invokes Runner, `report` regenerates from existing results, `trend` reads backdata.csv, `compare` diffs two runs. `python -m office_bench --help` works.
+
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2105,6 +2244,8 @@ def test_compare_command(capsys, tmp_path: Path) -> None:
     assert "run2" in captured
 ```
 
+
+
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
@@ -2112,6 +2253,8 @@ cd benchmarks && uv run pytest tests/test_cli.py -v
 ```
 
 Expected: FAIL — `office_bench.cli` not found.
+
+
 
 - [ ] **Step 3: Implement `benchmarks/src/office_bench/__main__.py`**
 
@@ -2124,6 +2267,8 @@ from office_bench.cli import main
 
 sys.exit(main())
 ```
+
+
 
 - [ ] **Step 4: Implement `benchmarks/src/office_bench/cli.py`**
 
@@ -2147,7 +2292,7 @@ from office_bench.results import (
 )
 from office_bench.runner import RunConfig, Runner
 
-PROJECT_ROOT = Path(__file__).resolve().parents[4]  # benchmarks/src/office_bench → project root
+PROJECT_ROOT = Path(__file__).resolve().parents[3]  # benchmarks/src/office_bench → repo root
 RESULTS_BASE = PROJECT_ROOT / "results" / "benchmarks"
 DATA_BASE = PROJECT_ROOT / "data" / "benchmarks"
 
@@ -2382,6 +2527,8 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     return 0
 ```
 
+
+
 - [ ] **Step 5: Run test to verify it passes**
 
 ```bash
@@ -2389,6 +2536,8 @@ cd benchmarks && uv run pytest tests/test_cli.py -v
 ```
 
 Expected: all 4 tests PASS.
+
+
 
 - [ ] **Step 6: Commit**
 
@@ -2399,23 +2548,29 @@ git commit -m "feat(bench): add CLI with run/list/report/trend/compare/setup com
 
 ---
 
-### Task 6: OfficeBench Suite Adapter
+### Task 7: OfficeBench Suite Adapter
 
 Implement the OfficeBench adapter — the first deterministic suite. Parses
 the task JSON structure, copies testbed files, and delegates evaluation to
 OfficeBench's native `evaluation.py`.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/suites/officebench.py`
 - Create: `benchmarks/tests/test_suite_officebench.py`
+- Create: `benchmarks/tests/fixtures/officebench/evaluation.py` (hermetic stand-in for the submodule's native evaluation module)
 
 **Interfaces:**
+
 - Consumes: `Suite`, `Task`, `AgentOutput`, `TaskResult` from Task 1
 - Produces:
   - `office_bench.suites.officebench.OfficeBenchSuite.__init__(repo_dir: Path)`
   - Implements `Suite` protocol: `name = "officebench"`, `load_tasks()`, `setup_workspace()`, `format_prompt()`, `evaluate()`
+  - `evaluate()` **delegates to the benchmark's native evaluation module** loaded from `repo_dir/evaluation.py` via importlib — it must NOT reimplement eval checks locally (spec §5.3: "keep their evaluation logic"), otherwise scores are not comparable to the published reference numbers
 
-**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_officebench.py -v` passes. Tests use fixture data mimicking OfficeBench structure — no real submodule needed. `load_tasks()` returns Task objects with correct fields. `evaluate()` calls deterministic checks and returns `TaskResult` with `judge_backend="deterministic"`.
+**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_officebench.py -v` passes. Tests use fixture data mimicking OfficeBench structure; the fixture tree ships its own `evaluation.py` so tests stay hermetic. `load_tasks()` returns Task objects with correct fields. `evaluate()` calls the native eval function by name; unknown/missing functions and native exceptions produce `passed=False` with an explicit error note — never a silent pass or fail. After `setup` clones the real submodule, the investigation note in Step 5 must be completed.
+
+
 
 - [ ] **Step 1: Create fixture test data**
 
@@ -2455,6 +2610,57 @@ Create `benchmarks/tests/fixtures/officebench/tasks/2/subtasks/2-1.json`:
 ```
 
 Create `benchmarks/tests/fixtures/officebench/tasks/2/testbed/data.csv` with content `a,b\n1,2`.
+
+Create `benchmarks/tests/fixtures/officebench/evaluation.py` — a hermetic stand-in mirroring the upstream evaluation API (the adapter loads `evaluation.py` from its repo dir; with fixtures as repo dir, this file plays the submodule's role):
+
+```python
+"""Fixture stand-in for OfficeBench's native evaluation module.
+
+Mirrors the upstream API surface used by the adapter. After `setup` clones
+the real submodule, verify the real function names/signatures (Step 5
+investigation) and keep this fixture in sync.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def evaluate_file_exist(args: dict, workspace_dir: Path) -> bool:
+    return (workspace_dir / args.get("file_path", "")).exists()
+
+
+def evaluate_contain(args: dict, workspace_dir: Path) -> bool:
+    file_path = workspace_dir / args.get("file_path", "")
+    if not file_path.exists():
+        return False
+    content = file_path.read_text(errors="replace")
+    return str(args.get("expected", "")).lower() in content.lower()
+
+
+def evaluate_exact_match(args: dict, workspace_dir: Path) -> bool:
+    file_path = workspace_dir / args.get("file_path", "")
+    if not file_path.exists():
+        return False
+    content = file_path.read_text(errors="replace").strip()
+    return content == str(args.get("expected", "")).strip()
+
+
+def evaluate_excel_cell_value(args: dict, workspace_dir: Path) -> bool:
+    from openpyxl import load_workbook
+
+    file_path = workspace_dir / args.get("file_path", "")
+    if not file_path.exists():
+        return False
+    wb = load_workbook(file_path, data_only=True)
+    ws = wb[args["sheet"]] if args.get("sheet") else wb.active
+    actual = ws[args.get("cell", "A1")].value
+    return actual is not None and str(actual).strip() == str(
+        args.get("expected", "")
+    ).strip()
+```
+
+
 
 - [ ] **Step 2: Write the failing test**
 
@@ -2557,6 +2763,8 @@ def test_evaluate_contain_fail(suite: OfficeBenchSuite, tmp_path: Path) -> None:
     assert result.passed is False
 ```
 
+
+
 - [ ] **Step 3: Run test to verify it fails**
 
 ```bash
@@ -2565,13 +2773,17 @@ cd benchmarks && uv run pytest tests/test_suite_officebench.py -v
 
 Expected: FAIL — `office_bench.suites.officebench` not found.
 
+
+
 - [ ] **Step 4: Implement `benchmarks/src/office_bench/suites/officebench.py`**
 
 ```python
-"""OfficeBench suite adapter — deterministic evaluation."""
+"""OfficeBench suite adapter — deterministic evaluation via the benchmark's
+native evaluation module."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 from pathlib import Path
@@ -2644,59 +2856,32 @@ class OfficeBenchSuite:
         workspace_dir: Path,
         agent_output: AgentOutput,
     ) -> TaskResult:
-        """Run deterministic evaluation based on eval_config."""
+        """Delegate to OfficeBench's native evaluation module (spec §5.3)."""
         eval_config = task.metadata.get("eval_config", {})
         func_name = eval_config.get("function", "")
         func_args = eval_config.get("args", {})
 
-        passed = False
-        notes = ""
+        module = self._load_native_evaluation()
+        if module is None:
+            return self._error_result(
+                task,
+                f"Native evaluation module not found: "
+                f"{self._repo_dir / 'evaluation.py'}",
+                func_name,
+            )
 
-        if func_name == "evaluate_file_exist":
-            file_path = workspace_dir / func_args.get("file_path", "")
-            passed = file_path.exists()
-            notes = f"File {'exists' if passed else 'missing'}: {func_args.get('file_path', '')}"
+        func = getattr(module, func_name, None)
+        if not callable(func):
+            return self._error_result(
+                task, f"Unknown eval function: {func_name}", func_name
+            )
 
-        elif func_name == "evaluate_contain":
-            file_path = workspace_dir / func_args.get("file_path", "")
-            expected = func_args.get("expected", "")
-            if file_path.exists():
-                content = file_path.read_text(errors="replace")
-                passed = expected.lower() in content.lower()
-                notes = f"{'Found' if passed else 'Missing'} '{expected}' in {func_args.get('file_path', '')}"
-            else:
-                notes = f"File not found: {func_args.get('file_path', '')}"
-
-        elif func_name == "evaluate_exact_match":
-            file_path = workspace_dir / func_args.get("file_path", "")
-            expected = func_args.get("expected", "")
-            if file_path.exists():
-                content = file_path.read_text(errors="replace").strip()
-                passed = content == expected.strip()
-                notes = f"Exact match: {passed}"
-            else:
-                notes = f"File not found: {func_args.get('file_path', '')}"
-
-        elif func_name == "evaluate_excel_cell_value":
-            file_path = workspace_dir / func_args.get("file_path", "")
-            sheet = func_args.get("sheet", None)
-            cell = func_args.get("cell", "A1")
-            expected = func_args.get("expected", "")
-            if file_path.exists():
-                try:
-                    from openpyxl import load_workbook
-                    wb = load_workbook(file_path, data_only=True)
-                    ws = wb[sheet] if sheet else wb.active
-                    actual = str(ws[cell].value) if ws[cell].value is not None else ""
-                    passed = actual.strip() == str(expected).strip()
-                    notes = f"Cell {cell}: expected={expected}, actual={actual}"
-                except Exception as e:
-                    notes = f"Excel eval error: {e}"
-            else:
-                notes = f"File not found: {func_args.get('file_path', '')}"
-
-        else:
-            notes = f"Unknown eval function: {func_name}"
+        try:
+            passed = bool(func(func_args, workspace_dir))
+        except Exception as e:
+            return self._error_result(
+                task, f"{func_name} raised: {e}", func_name
+            )
 
         return TaskResult(
             task_id=task.task_id,
@@ -2704,10 +2889,39 @@ class OfficeBenchSuite:
             passed=passed,
             score=1.0 if passed else 0.0,
             breakdown={func_name: 1.0 if passed else 0.0},
+            notes=f"{func_name} → {'PASS' if passed else 'FAIL'}",
+            judge_backend="deterministic",
+        )
+
+    def _load_native_evaluation(self):
+        """Import the benchmark's evaluation.py from the repo dir."""
+        eval_path = self._repo_dir / "evaluation.py"
+        if not eval_path.exists():
+            return None
+        spec = importlib.util.spec_from_file_location(
+            f"officebench_eval_{abs(hash(str(self._repo_dir)))}", eval_path
+        )
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _error_result(
+        self, task: Task, notes: str, func_name: str
+    ) -> TaskResult:
+        return TaskResult(
+            task_id=task.task_id,
+            suite=self.name,
+            passed=False,
+            score=0.0,
+            breakdown={func_name: 0.0},
             notes=notes,
             judge_backend="deterministic",
         )
 ```
+
+
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -2716,6 +2930,17 @@ cd benchmarks && uv run pytest tests/test_suite_officebench.py -v
 ```
 
 Expected: all 8 tests PASS.
+
+> **Investigation (after `setup` clones the real submodule):** inspect the
+> real `data/benchmarks/OfficeBench/evaluation.py` — confirm the eval function
+> names, their argument shapes, and whether a top-level `evaluate_output()`
+> dispatcher exists (spec §5.3 references it). If the real signatures differ
+> from the fixture stand-in (e.g. absolute paths, an eval-config object, or a
+> single dispatcher entry point), adapt the adapter's call site to the real
+> API — do NOT fork the checks back into local reimplementations. Keep the
+> fixture `evaluation.py` in sync with what you find.
+
+
 
 - [ ] **Step 6: Commit**
 
@@ -2726,24 +2951,28 @@ git commit -m "feat(bench): add OfficeBench deterministic suite adapter"
 
 ---
 
-### Task 7: PPTC Suite Adapter
+### Task 8: PPTC Suite Adapter
 
 Implement the PPTC adapter — second deterministic suite. Parses session
 JSONs, supports multi-turn sessions, and evaluates via PPTX-Match (position
 relation + attribute comparison).
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/suites/pptc.py`
 - Create: `benchmarks/tests/test_suite_pptc.py`
 - Create: `benchmarks/tests/fixtures/pptc/` (fixture data)
 
 **Interfaces:**
+
 - Consumes: `Suite`, `Task`, `AgentOutput`, `TaskResult` from Task 1
 - Produces:
   - `office_bench.suites.pptc.PPTCSuite.__init__(repo_dir: Path)`
   - Implements `Suite` protocol: `name = "pptc"`, `load_tasks()`, `setup_workspace()`, `format_prompt()`, `evaluate()`
 
-**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_pptc.py -v` passes. Tests use fixture data mimicking PPTC repo structure. `load_tasks()` returns multi-turn sessions as Task objects. `evaluate()` performs PPTX attribute comparison and returns `TaskResult` with `judge_backend="deterministic"`.
+**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_pptc.py -v` passes. Tests use fixture data mimicking PPTC repo structure, including a **label pptx** per session (the `PPT_label_*` tree that `main.py --prepare` generates). `load_tasks()` returns multi-turn sessions as Task objects with `metadata["turn_prompts"]` (the Runner's multi-turn hook). `evaluate()` compares the prediction .pptx against the **label** .pptx — per-slide text-attribute sets must match; a deck that merely contains "any text" must NOT pass. Missing label file → `score=0.0` with notes pointing at the prepare step. The session passes only when every label slide matches.
+
+
 
 - [ ] **Step 1: Create fixture test data**
 
@@ -2784,6 +3013,8 @@ Create `benchmarks/tests/fixtures/pptc/PPT_test_input/Edit_ppt_template/session_
 
 Create `benchmarks/tests/fixtures/pptc/PPT_test_input/Edit_ppt_template/template.pptx` — a minimal valid pptx created programmatically in tests.
 
+
+
 - [ ] **Step 2: Write the failing test**
 
 Create `benchmarks/tests/test_suite_pptc.py`:
@@ -2803,8 +3034,8 @@ FIXTURES = Path(__file__).parent / "fixtures" / "pptc"
 
 
 @pytest.fixture(autouse=True)
-def _create_template_pptx() -> None:
-    """Create a minimal template.pptx for the edit fixture."""
+def _create_fixture_pptx_files() -> None:
+    """Create template.pptx (edit fixture) and the session_1 label pptx."""
     template_path = FIXTURES / "PPT_test_input" / "Edit_ppt_template" / "template.pptx"
     if not template_path.exists():
         prs = Presentation()
@@ -2812,6 +3043,22 @@ def _create_template_pptx() -> None:
         slide.shapes.title.text = "Original Title"
         template_path.parent.mkdir(parents=True, exist_ok=True)
         prs.save(str(template_path))
+
+    # Label deck for session_1 (what main.py --prepare generates):
+    # slide 1 title "Hello World"; slide 2 title + two bullet points.
+    label_path = FIXTURES / "PPT_label_Create_new_slides" / "session_1.pptx"
+    if not label_path.exists():
+        prs = Presentation()
+        s1 = prs.slides.add_slide(prs.slide_layouts[0])
+        s1.shapes.title.text = "Hello World"
+        s2 = prs.slides.add_slide(prs.slide_layouts[1])
+        s2.shapes.title.text = "Agenda"
+        tf = s2.placeholders[1].text_frame  # type: ignore[index]
+        tf.text = "First point"
+        p = tf.add_paragraph()
+        p.text = "Second point"
+        label_path.parent.mkdir(parents=True, exist_ok=True)
+        prs.save(str(label_path))
 
 
 @pytest.fixture()
@@ -2842,6 +3089,11 @@ def test_task_fields(suite: PPTCSuite) -> None:
     assert t1.suite == "pptc"
     assert t1.category == "Create_new_slides"
     assert len(t1.metadata.get("turns", [])) == 2
+    assert t1.metadata["turn_prompts"] == [
+        "Create a title slide with text 'Hello World'",
+        "Add a second slide with bullet points",
+    ]
+    assert t1.metadata["label_file"] is not None
 
 
 def test_setup_workspace_copies_template(suite: PPTCSuite, tmp_path: Path) -> None:
@@ -2858,23 +3110,64 @@ def test_format_prompt_first_turn(suite: PPTCSuite) -> None:
     assert "Hello World" in prompt
 
 
-def test_evaluate_returns_task_result(suite: PPTCSuite, tmp_path: Path) -> None:
+def _save_two_slide_prediction(tmp_path: Path, title: str) -> None:
+    """Prediction deck with the same shape as the session_1 label."""
+    prs = Presentation()
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = title
+    s2 = prs.slides.add_slide(prs.slide_layouts[1])
+    s2.shapes.title.text = "Agenda"
+    tf = s2.placeholders[1].text_frame  # type: ignore[index]
+    tf.text = "First point"
+    p = tf.add_paragraph()
+    p.text = "Second point"
+    prs.save(str(tmp_path / "prediction.pptx"))
+
+
+def test_evaluate_match_passes(suite: PPTCSuite, tmp_path: Path) -> None:
     tasks = suite.load_tasks()
     t1 = next(t for t in tasks if t.task_id == "session_1")
 
-    # Create a prediction pptx
-    prs = Presentation()
-    slide = prs.slides.add_slide(prs.slide_layouts[0])
-    slide.shapes.title.text = "Hello World"
-    prs.save(str(tmp_path / "prediction.pptx"))
+    _save_two_slide_prediction(tmp_path, title="Hello World")
+    result = suite.evaluate(t1, tmp_path, _make_output())
 
-    output = _make_output()
-    result = suite.evaluate(t1, tmp_path, output)
     assert result.suite == "pptc"
     assert result.task_id == "session_1"
     assert result.judge_backend == "deterministic"
-    assert isinstance(result.score, float)
+    assert result.passed is True
+    assert result.score == 1.0
+
+
+def test_evaluate_wrong_content_fails(suite: PPTCSuite, tmp_path: Path) -> None:
+    """A deck with any-text-but-wrong-content must NOT pass."""
+    tasks = suite.load_tasks()
+    t1 = next(t for t in tasks if t.task_id == "session_1")
+
+    _save_two_slide_prediction(tmp_path, title="Wrong Title")
+    result = suite.evaluate(t1, tmp_path, _make_output())
+
+    assert result.passed is False
+    assert result.score < 1.0
+
+
+def test_evaluate_missing_label_reports_prepare_step(
+    suite: PPTCSuite, tmp_path: Path
+) -> None:
+    """session_2 has no label file — must fail with a prepare hint."""
+    tasks = suite.load_tasks()
+    t2 = next(t for t in tasks if t.task_id == "session_2")
+
+    prs = Presentation()
+    prs.slides.add_slide(prs.slide_layouts[0])
+    prs.save(str(tmp_path / "template.pptx"))
+
+    result = suite.evaluate(t2, tmp_path, _make_output())
+    assert result.passed is False
+    assert result.score == 0.0
+    assert "prepare" in result.notes.lower()
 ```
+
+
 
 - [ ] **Step 3: Run test to verify it fails**
 
@@ -2883,6 +3176,8 @@ cd benchmarks && uv run pytest tests/test_suite_pptc.py -v
 ```
 
 Expected: FAIL — `office_bench.suites.pptc` not found.
+
+
 
 - [ ] **Step 4: Implement `benchmarks/src/office_bench/suites/pptc.py`**
 
@@ -2937,8 +3232,12 @@ class PPTCSuite:
                     if template_path.exists():
                         input_files.append(template_path)
 
-                # First turn instruction becomes the prompt
-                first_prompt = turns[0]["instruction"] if turns else ""
+                turn_prompts = [t.get("instruction", "") for t in turns]
+                first_prompt = turn_prompts[0] if turn_prompts else ""
+
+                # Label pptx generated by the one-time prepare step
+                # (`main.py --prepare` → PPT_label_* tree)
+                label_path = self._find_label(session_id)
 
                 tasks.append(Task(
                     suite=self.name,
@@ -2948,9 +3247,11 @@ class PPTCSuite:
                     input_files=input_files,
                     metadata={
                         "turns": turns,
+                        "turn_prompts": turn_prompts,
                         "task_type": task_type,
                         "template": template,
                         "session_file": str(json_file),
+                        "label_file": str(label_path) if label_path else None,
                     },
                 ))
         return tasks
@@ -2971,10 +3272,24 @@ class PPTCSuite:
         workspace_dir: Path,
         agent_output: AgentOutput,
     ) -> TaskResult:
-        """PPTX-Match: compare prediction against expected attributes."""
-        # Look for prediction.pptx or any .pptx in workspace
-        prediction_path = self._find_prediction(workspace_dir)
+        """PPTX-Match: compare prediction .pptx against the label .pptx."""
+        label_value = task.metadata.get("label_file")
+        label_path = Path(label_value) if label_value else None
+        if label_path is None or not label_path.exists():
+            return TaskResult(
+                task_id=task.task_id,
+                suite=self.name,
+                passed=False,
+                score=0.0,
+                breakdown={},
+                notes=(
+                    "Label pptx not found — run the PPTC prepare step "
+                    "(main.py --prepare) before evaluating"
+                ),
+                judge_backend="deterministic",
+            )
 
+        prediction_path = self._find_prediction(workspace_dir)
         if prediction_path is None:
             return TaskResult(
                 task_id=task.task_id,
@@ -2986,9 +3301,9 @@ class PPTCSuite:
                 judge_backend="deterministic",
             )
 
-        # Basic attribute extraction for comparison
         try:
-            pred_attrs = self._extract_attributes(prediction_path)
+            pred_slides = self._slide_texts(prediction_path)
+            label_slides = self._slide_texts(label_path)
         except Exception as e:
             return TaskResult(
                 task_id=task.task_id,
@@ -2996,33 +3311,25 @@ class PPTCSuite:
                 passed=False,
                 score=0.0,
                 breakdown={},
-                notes=f"Error parsing prediction pptx: {e}",
+                notes=f"Error parsing pptx: {e}",
                 judge_backend="deterministic",
             )
 
-        # For now: score based on slide count and non-empty content
-        turns = task.metadata.get("turns", [])
-        expected_interactions = len(turns)
-        has_content = len(pred_attrs.get("texts", [])) > 0
-        has_slides = pred_attrs.get("slide_count", 0) > 0
-
-        score = 0.0
         breakdown: dict[str, float] = {}
+        matched = 0
+        for idx, label_texts in enumerate(label_slides):
+            pred_texts = pred_slides[idx] if idx < len(pred_slides) else []
+            ok = label_texts == pred_texts
+            breakdown[f"slide_{idx + 1}"] = 1.0 if ok else 0.0
+            matched += ok
 
-        if has_slides:
-            score += 0.5
-            breakdown["has_slides"] = 1.0
-        else:
-            breakdown["has_slides"] = 0.0
+        extra = len(pred_slides) - len(label_slides)
+        if extra > 0:
+            breakdown["extra_slides"] = 0.0
 
-        if has_content:
-            score += 0.5
-            breakdown["has_content"] = 1.0
-        else:
-            breakdown["has_content"] = 0.0
-
-        passed = score >= 0.5
-        notes = f"slides={pred_attrs.get('slide_count', 0)}, texts={len(pred_attrs.get('texts', []))}"
+        score = matched / len(label_slides) if label_slides else 0.0
+        passed = matched == len(label_slides) and extra <= 0 and bool(label_slides)
+        notes = f"{matched}/{len(label_slides)} slides matched"
 
         return TaskResult(
             task_id=task.task_id,
@@ -3033,6 +3340,26 @@ class PPTCSuite:
             notes=notes,
             judge_backend="deterministic",
         )
+
+    def _find_label(self, session_id: str) -> Path | None:
+        """Find the label pptx for a session in the PPT_label_* tree."""
+        for label_dir in sorted(self._repo_dir.glob("PPT_label_*")):
+            for candidate in (
+                label_dir / f"{session_id}.pptx",
+                label_dir / self._task_type_dir_name(session_id) / f"{session_id}.pptx",
+            ):
+                if candidate.exists():
+                    return candidate
+        return None
+
+    def _task_type_dir_name(self, session_id: str) -> str:
+        """Best-effort: task-type dir containing this session's input."""
+        for task_type_dir in sorted(
+            (self._repo_dir / "PPT_test_input").iterdir()
+        ):
+            if (task_type_dir / f"{session_id}.json").exists():
+                return task_type_dir.name
+        return ""
 
     @staticmethod
     def _find_prediction(workspace_dir: Path) -> Path | None:
@@ -3046,22 +3373,21 @@ class PPTCSuite:
         return pptx_files[0] if pptx_files else None
 
     @staticmethod
-    def _extract_attributes(pptx_path: Path) -> dict:
-        """Extract basic attributes from a pptx for comparison."""
+    def _slide_texts(pptx_path: Path) -> list[list[str]]:
+        """Per-slide sorted text sets — the attribute signature for matching."""
         prs = Presentation(str(pptx_path))
-        texts: list[str] = []
+        slides: list[list[str]] = []
         for slide in prs.slides:
-            for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for paragraph in shape.text_frame.paragraphs:
-                        text = paragraph.text.strip()
-                        if text:
-                            texts.append(text)
-        return {
-            "slide_count": len(prs.slides),
-            "texts": texts,
-        }
+            texts = [
+                shape.text_frame.text.strip()
+                for shape in slide.shapes
+                if shape.has_text_frame and shape.text_frame.text.strip()
+            ]
+            slides.append(sorted(texts))
+        return slides
 ```
+
+
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -3069,7 +3395,17 @@ class PPTCSuite:
 cd benchmarks && uv run pytest tests/test_suite_pptc.py -v
 ```
 
-Expected: all 5 tests PASS.
+Expected: all 7 tests PASS.
+
+> **Investigation (after `setup` clones the real submodule):** check the real
+> `PPT_label_*` layout produced by `main.py --prepare` (flat vs nested by
+> task type) and adjust `_find_label()`. PPTC's full PPTX-Match also scores
+> position relations between shapes; this adapter approximates it with
+> per-slide text-set comparison. If the submodule's matcher is importable
+> without side effects, prefer delegating to it (as the OfficeBench adapter
+> does) instead of keeping the approximation.
+
+
 
 - [ ] **Step 6: Commit**
 
@@ -3080,24 +3416,28 @@ git commit -m "feat(bench): add PPTC deterministic suite adapter"
 
 ---
 
-### Task 8: SpreadsheetBench 2 Suite Adapter
+### Task 9: SpreadsheetBench 2 Suite Adapter
 
 Implement the SpreadsheetBench 2 adapter for the three deterministic
-categories (Debugging, Financial_Model, Template). Visualization is deferred
+categories (Debugging, Financial\_Model, Template). Visualization is deferred
 to Phase 6.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/suites/spreadsheet.py`
 - Create: `benchmarks/tests/test_suite_spreadsheet.py`
 - Create: `benchmarks/tests/fixtures/spreadsheet/` (fixture data)
 
 **Interfaces:**
+
 - Consumes: `Suite`, `Task`, `AgentOutput`, `TaskResult` from Task 1
 - Produces:
   - `office_bench.suites.spreadsheet.SpreadsheetSuite.__init__(repo_dir: Path)`
   - Implements `Suite` protocol: `name = "spreadsheet"`, `load_tasks()`, `setup_workspace()`, `format_prompt()`, `evaluate()`
 
-**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_spreadsheet.py -v` passes. Tests use fixture data mimicking SpreadsheetBench 2 dataset.json structure. Cell-level comparison works for value and formula match with tolerance. Visualization tasks return `score=0.0` with notes indicating deferred status.
+**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_spreadsheet.py -v` passes. Tests use fixture data mimicking SpreadsheetBench 2 dataset.json structure. **Before cell comparison, `evaluate()` recalculates the workbook via LibreOffice headless** (spec §5.3 prerequisite — openpyxl-written files carry no cached formula results, so `data_only=True` would read `None` for every formula cell); unit tests monkeypatch `_recalculate` to identity because fixtures write literal values. Recalc failure (soffice missing/crash) → `passed=False` with an explicit note, never silent zero-matching. Cell-level comparison works for value and formula match with tolerance. Visualization tasks return `score=0.0` with notes indicating deferred status.
+
+
 
 - [ ] **Step 1: Create fixture test data**
 
@@ -3148,6 +3488,8 @@ Create `benchmarks/tests/fixtures/spreadsheet/data/Visualization/dataset.json`:
 ]
 ```
 
+
+
 - [ ] **Step 2: Write the failing test**
 
 Create `benchmarks/tests/test_suite_spreadsheet.py`:
@@ -3164,6 +3506,14 @@ from office_bench.suites.spreadsheet import SpreadsheetSuite
 from office_bench.suites.base import AgentOutput
 
 FIXTURES = Path(__file__).parent / "fixtures" / "spreadsheet"
+
+
+@pytest.fixture(autouse=True)
+def _no_recalc(monkeypatch) -> None:
+    """Skip LibreOffice recalc in unit tests — fixtures write literal values."""
+    monkeypatch.setattr(
+        SpreadsheetSuite, "_recalculate", staticmethod(lambda p: p)
+    )
 
 
 @pytest.fixture()
@@ -3262,7 +3612,29 @@ def test_evaluate_missing_file(suite: SpreadsheetSuite, tmp_path: Path) -> None:
     t = next(t for t in tasks if t.task_id == "debug-001")
     result = suite.evaluate(t, tmp_path, _make_output())
     assert result.passed is False
+
+
+def test_evaluate_recalc_failure_fails_cleanly(
+    suite: SpreadsheetSuite, tmp_path: Path, monkeypatch
+) -> None:
+    """soffice missing/crashing must fail the task with an explicit note."""
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "debug-001")
+
+    wb = Workbook()
+    ws = wb.active
+    ws["B5"] = 150
+    wb.save(tmp_path / "debug-001.xlsx")
+
+    monkeypatch.setattr(
+        SpreadsheetSuite, "_recalculate", staticmethod(lambda p: None)
+    )
+    result = suite.evaluate(t, tmp_path, _make_output())
+    assert result.passed is False
+    assert "recalc" in result.notes.lower()
 ```
+
+
 
 - [ ] **Step 3: Run test to verify it fails**
 
@@ -3272,6 +3644,8 @@ cd benchmarks && uv run pytest tests/test_suite_spreadsheet.py -v
 
 Expected: FAIL — `office_bench.suites.spreadsheet` not found.
 
+
+
 - [ ] **Step 4: Implement `benchmarks/src/office_bench/suites/spreadsheet.py`**
 
 ```python
@@ -3280,6 +3654,9 @@ Expected: FAIL — `office_bench.suites.spreadsheet` not found.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -3341,8 +3718,6 @@ class SpreadsheetSuite:
 
     def setup_workspace(self, task: Task, workspace_dir: Path) -> None:
         """Copy spreadsheet files into workspace."""
-        import shutil
-
         for src in task.input_files:
             shutil.copy2(src, workspace_dir / src.name)
 
@@ -3396,8 +3771,26 @@ class SpreadsheetSuite:
                 judge_backend="deterministic",
             )
 
+        # LibreOffice recalc (spec §5.3 prerequisite): openpyxl-written files
+        # carry no cached formula results, so data_only=True would read None
+        # for every formula cell and fail even correct answers.
+        recalced = self._recalculate(output_path)
+        if recalced is None:
+            return TaskResult(
+                task_id=task.task_id,
+                suite=self.name,
+                passed=False,
+                score=0.0,
+                breakdown={},
+                notes=(
+                    "LibreOffice recalc unavailable or failed — formula "
+                    "results cannot be compared"
+                ),
+                judge_backend="deterministic",
+            )
+
         try:
-            wb = load_workbook(output_path, data_only=True)
+            wb = load_workbook(recalced, data_only=True)
             ws = wb.active
         except Exception as e:
             return TaskResult(
@@ -3458,7 +3851,35 @@ class SpreadsheetSuite:
 
         # Fall back to string comparison
         return actual_str == expected_str.strip()
+
+    _SOFFICE = "soffice"
+
+    @classmethod
+    def _recalculate(cls, xlsx_path: Path) -> Path | None:
+        """Recalculate formulas via LibreOffice headless.
+
+        Returns the recalculated copy's path, or None on failure. Unit tests
+        monkeypatch this method to the identity function — fixtures write
+        literal values, so no recalc is needed there.
+        """
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                subprocess.run(
+                    [cls._SOFFICE, "--headless", "--convert-to", "xlsx",
+                     "--outdir", tmp, str(xlsx_path)],
+                    capture_output=True, timeout=120, check=True,
+                )
+                converted = Path(tmp) / xlsx_path.name
+                if not converted.exists():
+                    return None
+                target = xlsx_path.with_suffix(".recalced.xlsx")
+                shutil.copy2(converted, target)
+                return target
+        except (OSError, subprocess.SubprocessError):
+            return None
 ```
+
+
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -3466,7 +3887,9 @@ class SpreadsheetSuite:
 cd benchmarks && uv run pytest tests/test_suite_spreadsheet.py -v
 ```
 
-Expected: all 7 tests PASS.
+Expected: all 8 tests PASS.
+
+
 
 - [ ] **Step 6: Commit**
 
@@ -3477,13 +3900,14 @@ git commit -m "feat(bench): add SpreadsheetBench 2 deterministic suite adapter"
 
 ---
 
-### Task 9: FORTE Suite Adapter with LLM Judge
+### Task 10: FORTE Suite Adapter with LLM Judge
 
 Implement the FORTE adapter — the LLM-judge-dependent suite. Parses task
 markdown with YAML frontmatter, imports FORTE's own grading logic from the
 submodule, and integrates the LLM judge backend.
 
 **Files:**
+
 - Create: `benchmarks/src/office_bench/suites/forte.py`
 - Create: `benchmarks/src/office_bench/judges/llm.py`
 - Create: `benchmarks/tests/test_suite_forte.py`
@@ -3491,6 +3915,7 @@ submodule, and integrates the LLM judge backend.
 - Create: `benchmarks/tests/fixtures/forte/` (fixture data)
 
 **Interfaces:**
+
 - Consumes:
   - `Suite`, `Task`, `AgentOutput`, `TaskResult` from Task 1
   - `JudgeBackend`, `Rubric`, `JudgeContext`, `RubricResult` from Task 1
@@ -3500,7 +3925,9 @@ submodule, and integrates the LLM judge backend.
   - `office_bench.judges.llm.LLMJudge.__init__(model: str = "deepseek-chat", base_url: str = "https://api.deepseek.com", api_key: str = "")` — reads from env vars if not provided
   - `office_bench.judges.llm.LLMJudge` implements `JudgeBackend` protocol: `name = "llm:deepseek-chat"`
 
-**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_forte.py benchmarks/tests/test_judge_llm.py -v` passes. FORTE tests use fixture markdown tasks with YAML frontmatter. LLM judge tests mock the HTTP call to DeepSeek API. `evaluate()` calls the judge for llm_judge grading types and returns scored `TaskResult`.
+**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_suite_forte.py benchmarks/tests/test_judge_llm.py -v` passes. FORTE tests use fixture markdown tasks with YAML frontmatter plus a fixture `judge/grade.py` so automated grading is hermetic. LLM judge tests mock the HTTP call to DeepSeek API. `evaluate()` handles **all three grading types**: `automated` (and the automated half of `hybrid`) delegates to FORTE's own `judge.grade.grade_one` imported from the submodule — never auto-passes; `llm_judge` grades each rubric via the LLM judge; `hybrid` requires both halves. An automated task without rubrics is **not evaluable** → `passed=False` with an explanatory note. Missing/unimportable grader → `passed=False` with an explicit error, never a silent pass.
+
+
 
 - [ ] **Step 1: Create fixture test data**
 
@@ -3550,6 +3977,56 @@ solution_files: []
 List all employees in department A.
 ```
 
+Create `benchmarks/tests/fixtures/forte/data/tasks/hr-002.md` (automated WITH rubrics — exercises the grade_one delegation):
+
+```markdown
+---
+id: hr-002
+category: hr
+grading_type: automated
+timeout_seconds: 120
+rubrics:
+  - id: "01"
+    content: "Response lists department A employees"
+    weight: 1.0
+workspace_files: []
+solution_files: []
+---
+
+## Prompt
+
+List all employees in department A as a table.
+```
+
+Create `benchmarks/tests/fixtures/forte/judge/__init__.py` (empty) and `benchmarks/tests/fixtures/forte/judge/grade.py` — the hermetic stand-in for FORTE's native grading module (the adapter loads `judge/grade.py` from its repo dir):
+
+```python
+"""Fixture stand-in for FORTE's judge.grade module.
+
+Mirrors the upstream grade_one API the adapter calls. After `setup` clones
+the real submodule, verify the real signature (Step 7 investigation) and
+keep this fixture in sync.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def grade_one(
+    instruction: str,
+    agent_response: str,
+    rubrics: list[dict],
+    workspace_dir: Path | None = None,
+    solution_dir: Path | None = None,
+) -> tuple[bool, dict]:
+    """Deterministic fake: passes when the response mentions 'department A'."""
+    passed = "department a" in agent_response.lower()
+    return passed, {"01": 1.0 if passed else 0.0}
+```
+
+
+
 - [ ] **Step 2: Write the failing test for FORTE suite**
 
 Create `benchmarks/tests/test_suite_forte.py`:
@@ -3593,10 +4070,11 @@ def _make_output() -> AgentOutput:
 
 def test_load_tasks(suite: ForteSuite) -> None:
     tasks = suite.load_tasks()
-    assert len(tasks) == 2
+    assert len(tasks) == 3
     ids = {t.task_id for t in tasks}
     assert "finance-001" in ids
     assert "hr-001" in ids
+    assert "hr-002" in ids
 
 
 def test_task_fields(suite: ForteSuite) -> None:
@@ -3623,17 +4101,73 @@ def test_format_prompt(suite: ForteSuite) -> None:
     assert "data.xlsx" in prompt
 
 
-def test_evaluate_automated_task(suite: ForteSuite, tmp_path: Path) -> None:
-    """Automated grading type should not require LLM judge."""
+def _make_output_with(text: str) -> AgentOutput:
+    return AgentOutput(
+        messages=[{"role": "assistant", "content": text}],
+        files_created=[],
+        tool_calls=[],
+        duration_seconds=10.0,
+    )
+
+
+def test_evaluate_automated_delegates_to_grade_one(
+    suite: ForteSuite, tmp_path: Path
+) -> None:
+    """automated WITH rubrics must go through judge.grade.grade_one."""
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "hr-002")
+
+    result = suite.evaluate(
+        t, tmp_path, _make_output_with("Employees in department A: Alice, Bob")
+    )
+    assert result.passed is True
+    assert result.score == 1.0
+    assert result.judge_backend == "deterministic"
+    assert result.breakdown.get("01") == 1.0
+
+    result_fail = suite.evaluate(
+        t, tmp_path, _make_output_with("No idea, sorry")
+    )
+    assert result_fail.passed is False
+    assert result_fail.score == 0.0
+
+
+def test_evaluate_automated_without_rubrics_not_evaluable(
+    suite: ForteSuite, tmp_path: Path
+) -> None:
+    """No rubrics + automated = not evaluable — must NOT auto-pass."""
     tasks = suite.load_tasks()
     t = next(t for t in tasks if t.task_id == "hr-001")
-    output = _make_output()
-    result = suite.evaluate(t, tmp_path, output)
-    assert result.suite == "forte"
-    assert result.task_id == "hr-001"
-    # Automated without rubrics = pass (no rubrics to fail)
-    assert isinstance(result.score, float)
+    result = suite.evaluate(t, tmp_path, _make_output())
+    assert result.passed is False
+    assert result.score == 0.0
+    assert "not evaluable" in result.notes.lower()
+
+
+def test_evaluate_grader_missing_fails_cleanly(tmp_path: Path) -> None:
+    """A repo dir without judge/grade.py must fail with an explicit error."""
+    bare = tmp_path / "bare_forte"  # no judge/ package inside
+    bare.mkdir()
+    suite = ForteSuite(bare)
+    tasks = suite.load_tasks()
+    assert tasks == []  # nothing to load — construct a task manually
+    from office_bench.suites.base import Task
+
+    task = Task(
+        suite="forte",
+        task_id="x-1",
+        prompt="p",
+        category="c",
+        input_files=[],
+        metadata={"rubrics": [{"id": "01", "content": "r", "weight": 1.0}],
+                  "grading_type": "automated"},
+    )
+    result = suite.evaluate(task, tmp_path, _make_output())
+    assert result.passed is False
+    assert "grade" in result.notes.lower()
 ```
+
+
 
 - [ ] **Step 3: Write the failing test for LLM judge**
 
@@ -3763,6 +4297,8 @@ def test_llm_judge_rubric_fail(mock_api) -> None:
         thread.join(timeout=5)
 ```
 
+
+
 - [ ] **Step 4: Run tests to verify they fail**
 
 ```bash
@@ -3770,6 +4306,8 @@ cd benchmarks && uv run pytest tests/test_suite_forte.py tests/test_judge_llm.py
 ```
 
 Expected: FAIL — modules not found.
+
+
 
 - [ ] **Step 5: Implement `benchmarks/src/office_bench/judges/llm.py`**
 
@@ -3875,13 +4413,16 @@ class LLMJudge:
         )
 ```
 
+
+
 - [ ] **Step 6: Implement `benchmarks/src/office_bench/suites/forte.py`**
 
 ```python
-"""FORTE suite adapter — LLM judge + automated evaluation."""
+"""FORTE suite adapter — native grade_one + LLM judge evaluation."""
 
 from __future__ import annotations
 
+import importlib.util
 import re
 import shutil
 from pathlib import Path
@@ -3963,48 +4504,61 @@ class ForteSuite:
         workspace_dir: Path,
         agent_output: AgentOutput,
     ) -> TaskResult:
-        """Evaluate using LLM judge or automated checks based on grading_type."""
+        """Grade via FORTE's native grade_one and/or the LLM judge."""
         grading_type = task.metadata.get("grading_type", "automated")
         rubrics = task.metadata.get("rubrics", [])
 
+        agent_response = (
+            agent_output.messages[-1].get("content", "")
+            if agent_output.messages
+            else ""
+        )
+
         if not rubrics:
-            # No rubrics → pass by default (automated tasks with code-based eval
-            # would import from submodule; placeholder for now)
-            return TaskResult(
-                task_id=task.task_id,
-                suite=self.name,
-                passed=True,
-                score=1.0,
-                breakdown={},
-                notes="No rubrics defined; automated evaluation placeholder",
-                judge_backend="deterministic",
+            # Nothing to grade — NEVER award an unearned pass
+            return self._error_result(
+                task, "no rubrics defined — task not evaluable"
             )
-
-        agent_response = ""
-        if agent_output.messages:
-            agent_response = agent_output.messages[-1].get("content", "")
-
-        # Read workspace files for judge context
-        file_contents: dict[str, str] = {}
-        for f in workspace_dir.iterdir():
-            if f.is_file() and f.suffix in (".txt", ".csv", ".md", ".json"):
-                try:
-                    file_contents[f.name] = f.read_text(errors="replace")[:10000]
-                except OSError:
-                    pass
 
         breakdown: dict[str, float] = {}
         all_passed = True
+        backends: list[str] = []
+
+        if grading_type in ("automated", "hybrid"):
+            grade_one = self._load_grader()
+            if grade_one is None:
+                return self._error_result(
+                    task,
+                    "FORTE judge.grade not importable from submodule",
+                )
+            try:
+                auto_passed, auto_detail = grade_one(
+                    instruction=task.prompt,
+                    agent_response=agent_response,
+                    rubrics=rubrics,
+                    workspace_dir=workspace_dir,
+                    solution_dir=self._solution_dir(task),
+                )
+            except TypeError as e:
+                return self._error_result(
+                    task, f"grade_one signature mismatch: {e}"
+                )
+            if isinstance(auto_detail, dict):
+                breakdown.update(auto_detail)
+            else:
+                breakdown["automated"] = 1.0 if auto_passed else 0.0
+            if not auto_passed:
+                all_passed = False
+            backends.append("deterministic")
 
         if grading_type in ("llm_judge", "hybrid"):
             context = JudgeContext(
                 instruction=task.prompt,
                 agent_response=agent_response,
-                file_contents=file_contents,
+                file_contents=self._read_workspace_text(workspace_dir),
                 file_images=[],
                 file_pdfs=[],
             )
-
             for rubric_data in rubrics:
                 rubric = Rubric(
                     id=rubric_data["id"],
@@ -4015,20 +4569,62 @@ class ForteSuite:
                 breakdown[rubric.id] = 1.0 if result.passed else 0.0
                 if not result.passed:
                     all_passed = False
+            backends.append(self._judge.name)
 
         # FORTE: all-or-nothing per task
-        score = 1.0 if all_passed else 0.0
         failed_ids = [k for k, v in breakdown.items() if v == 0.0]
-        notes = f"Failed rubrics: {failed_ids}" if failed_ids else "All rubrics passed"
-
         return TaskResult(
             task_id=task.task_id,
             suite=self.name,
             passed=all_passed,
-            score=score,
+            score=1.0 if all_passed else 0.0,
             breakdown=breakdown,
+            notes=(
+                f"Failed rubrics: {failed_ids}" if failed_ids
+                else "All rubrics passed"
+            ),
+            judge_backend="+".join(backends) if backends else None,
+        )
+
+    def _load_grader(self):
+        """Import judge/grade.py from the FORTE submodule."""
+        grade_path = self._repo_dir / "judge" / "grade.py"
+        if not grade_path.exists():
+            return None
+        spec = importlib.util.spec_from_file_location(
+            f"forte_grade_{abs(hash(str(self._repo_dir)))}", grade_path
+        )
+        if spec is None or spec.loader is None:
+            return None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return getattr(module, "grade_one", None)
+
+    def _solution_dir(self, task: Task) -> Path | None:
+        """Read-only solution dir mounted for the judge, never the agent."""
+        candidate = self._repo_dir / "data" / "solutions" / task.task_id
+        return candidate if candidate.exists() else None
+
+    @staticmethod
+    def _read_workspace_text(workspace_dir: Path) -> dict[str, str]:
+        file_contents: dict[str, str] = {}
+        for f in workspace_dir.iterdir():
+            if f.is_file() and f.suffix in (".txt", ".csv", ".md", ".json"):
+                try:
+                    file_contents[f.name] = f.read_text(errors="replace")[:10000]
+                except OSError:
+                    pass
+        return file_contents
+
+    def _error_result(self, task: Task, notes: str) -> TaskResult:
+        return TaskResult(
+            task_id=task.task_id,
+            suite=self.name,
+            passed=False,
+            score=0.0,
+            breakdown={},
             notes=notes,
-            judge_backend=self._judge.name,
+            judge_backend="deterministic",
         )
 
     @staticmethod
@@ -4049,13 +4645,27 @@ class ForteSuite:
         return frontmatter, prompt
 ```
 
+
+
 - [ ] **Step 7: Run tests to verify they pass**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_suite_forte.py tests/test_judge_llm.py -v
 ```
 
-Expected: all 8 tests PASS.
+Expected: all 10 tests PASS.
+
+> **Investigation (after `setup` clones the real submodule):** read
+> `data/benchmarks/FORTE/judge/grade.py` and pin down the real `grade_one`
+> signature (argument names, return shape, env-based judge config
+> `JUDGE_MODEL`/`JUDGE_BASE_URL`/`JUDGE_API_KEY`). Adapt the adapter's call
+> and the fixture `judge/grade.py` to match. Also check whether reusing
+> FORTE's `build_prompt.py`/`system_prompt.py`/`parse_grading.py` for the
+> LLM judge (spec §7.2) is importable without side effects — if yes,
+> `LLMJudge` should build its prompt through them instead of its own
+> inline prompt.
+
+
 
 - [ ] **Step 8: Commit**
 
@@ -4066,22 +4676,26 @@ git commit -m "feat(bench): add FORTE suite adapter and LLM judge backend"
 
 ---
 
-### Task 10: Setup Command & Git Submodules
+### Task 11: Setup Command &amp; Git Submodules
 
 Wire the `setup` CLI command to actually clone submodules, download the
 SpreadsheetBench 2 dataset, generate PPTC labels, and verify prerequisites.
 Add `.gitmodules` entries.
 
 **Files:**
+
 - Create: `.gitmodules` (or modify if exists)
 - Modify: `benchmarks/src/office_bench/cli.py` — enhance `_cmd_setup()`
 - Create: `benchmarks/tests/test_setup.py`
 
 **Interfaces:**
-- Consumes: CLI `_cmd_setup()` from Task 5
+
+- Consumes: CLI `_cmd_setup()` from Task 6
 - Produces: `_cmd_setup()` now performs all 6 setup steps from spec §10.3
 
 **DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_setup.py -v` passes. Tests mock subprocess calls and verify the correct commands are invoked. `.gitmodules` contains all four submodule entries.
+
+
 
 - [ ] **Step 1: Write the failing test**
 
@@ -4125,6 +4739,8 @@ def test_setup_checks_api_key(monkeypatch) -> None:
     assert "API" in printed or "key" in printed.lower() or "JUDGE" in printed
 ```
 
+
+
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
@@ -4132,6 +4748,8 @@ cd benchmarks && uv run pytest tests/test_setup.py -v
 ```
 
 Expected: FAIL or PASS depending on current `_cmd_setup` — if it works with the simple version, refine the test.
+
+
 
 - [ ] **Step 3: Enhance `_cmd_setup()` in `benchmarks/src/office_bench/cli.py`**
 
@@ -4199,6 +4817,8 @@ def _cmd_setup() -> int:
     return 0
 ```
 
+
+
 - [ ] **Step 4: Create `.gitmodules`**
 
 ```ini
@@ -4219,6 +4839,8 @@ def _cmd_setup() -> int:
 	url = https://github.com/gydpku/PPTC.git
 ```
 
+
+
 - [ ] **Step 5: Run tests to verify they pass**
 
 ```bash
@@ -4226,6 +4848,8 @@ cd benchmarks && uv run pytest tests/test_setup.py -v
 ```
 
 Expected: all 2 tests PASS.
+
+
 
 - [ ] **Step 6: Commit**
 
@@ -4236,20 +4860,24 @@ git commit -m "feat(bench): wire setup command with submodules, dataset download
 
 ---
 
-### Task 11: Integration Test — Full Pipeline Dry Run
+### Task 12: Integration Test — Full Pipeline Dry Run
 
 Write an integration test that exercises the entire pipeline end-to-end with
 fake suite data and a mock agent bridge. Verifies that `Runner` produces the
 correct directory structure, JSON files, backdata CSV row, and report.
 
 **Files:**
+
 - Create: `benchmarks/tests/test_integration.py`
 
 **Interfaces:**
-- Consumes: All modules from Tasks 1–5
+
+- Consumes: All modules from Tasks 1–6
 - Produces: No new modules — validation only
 
 **DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_integration.py -v` passes. Test creates a fake suite, runs the full pipeline, and asserts: `meta.json` exists, per-task JSONs match expected count, `backdata.csv` has correct row, `report.md` contains suite name and score.
+
+
 
 - [ ] **Step 1: Write the integration test**
 
@@ -4359,6 +4987,8 @@ def test_full_pipeline(tmp_path: Path) -> None:
     assert len(rows) == 1  # one row per suite
     assert rows[0]["suite"] == "integ"
     assert float(rows[0]["primary_value"]) == pytest.approx(66.67, abs=0.1)
+    assert rows[0]["model"] != ""  # spec §9.3 requires both columns
+    assert rows[0]["agent_version"] != ""
 
     # 6. Report contains expected content
     report = (run_dir / "report.md").read_text()
@@ -4400,7 +5030,12 @@ def test_resume_skips_completed_tasks(tmp_path: Path) -> None:
     runner2 = Runner(config, {"integ": IntegrationSuite()}, bridge=bridge)
     runner2.run(tmp_path, run_id=run_dir.name)
     assert bridge.run_task.call_count == 0
+    # And must not append a duplicate backdata row
+    with (tmp_path / "backdata.csv").open() as f:
+        assert len(list(csv.DictReader(f))) == 1
 ```
+
+
 
 - [ ] **Step 2: Run the integration test**
 
@@ -4410,6 +5045,8 @@ cd benchmarks && uv run pytest tests/test_integration.py -v
 
 Expected: all 2 tests PASS.
 
+
+
 - [ ] **Step 3: Run entire test suite to verify nothing is broken**
 
 ```bash
@@ -4417,6 +5054,8 @@ cd benchmarks && uv run pytest tests/ -v --tb=short
 ```
 
 Expected: all tests across all files PASS.
+
+
 
 - [ ] **Step 4: Commit**
 
@@ -4429,17 +5068,19 @@ git commit -m "test(bench): add end-to-end integration test for full pipeline"
 
 ## Summary
 
-| Task | Component | Files | Tests | Phase |
-|------|-----------|-------|-------|-------|
-| 1 | Scaffold + Data Types | 8 create, 1 modify | 9 | 1 |
-| 2 | Agent Bridge | 1 create, 1 test | 4 | 1 |
-| 3 | Results + Backdata + Reference | 2 create, 1 test | 10 | 1 |
-| 4 | Runner Orchestrator | 1 create, 1 test | 9 | 1 |
-| 5 | CLI | 2 create, 1 test | 4 | 1 |
-| 6 | OfficeBench Adapter | 1 create, 1 test, fixtures | 8 | 2 |
-| 7 | PPTC Adapter | 1 create, 1 test, fixtures | 5 | 2 |
-| 8 | SpreadsheetBench 2 Adapter | 1 create, 1 test, fixtures | 7 | 3 |
-| 9 | FORTE + LLM Judge | 2 create, 2 test, fixtures | 8 | 4 |
-| 10 | Setup Command + Submodules | 1 create, 2 modify, 1 test | 2 | 5 |
-| 11 | Integration Test | 1 test | 2 | 5 |
-| **Total** | | **~25 files** | **68 tests** | |
+
+| Task      | Component                              | Files                        | Tests        | Phase |
+| --------- | -------------------------------------- | ---------------------------- | ------------ | ----- |
+| 1         | Scaffold + Data Types                  | 8 create, 1 modify           | 9            | 1     |
+| 2         | Per-Request Workspace Binding (agent)  | 1 modify, 1 test             | 4            | 1     |
+| 3         | Agent Bridge                           | 1 create, 1 test             | 4            | 1     |
+| 4         | Results + Backdata + Reference         | 2 create, 1 test             | 11           | 1     |
+| 5         | Runner Orchestrator                    | 1 create, 1 test             | 11           | 1     |
+| 6         | CLI                                    | 2 create, 1 test             | 4            | 1     |
+| 7         | OfficeBench Adapter (native eval)      | 1 create, 1 test, fixtures   | 8            | 2     |
+| 8         | PPTC Adapter (label-based match)       | 1 create, 1 test, fixtures   | 7            | 2     |
+| 9         | SpreadsheetBench 2 Adapter (+recalc)   | 1 create, 1 test, fixtures   | 8            | 3     |
+| 10        | FORTE + LLM Judge (grade_one)          | 2 create, 2 test, fixtures   | 10           | 4     |
+| 11        | Setup Command + Submodules             | 1 create, 2 modify, 1 test   | 2            | 5     |
+| 12        | Integration Test                       | 1 test                       | 2            | 5     |
+| **Total** |                                        | **\~28 files**               | **80 tests** |       |

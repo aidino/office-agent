@@ -4,6 +4,14 @@
 **Status**: Approved
 **Author**: Dino + AI
 
+> **Amendment (2026-10-01, post code review):** per-task workspace isolation
+> is delivered inside the AG-UI payload as `state._runtime_workspace` —
+> agentseek carries it into `config.metadata.workspace` and the office_agent
+> binding (`binding.py`, Task 2 of the implementation plan) exports it to
+> `OFFICE_AGENT_WORKSPACE` per request. This is the one scoped exception to
+> "existing agent code unchanged". Multi-turn tasks advertise turns via
+> `Task.metadata["turn_prompts"]`; the Runner calls `run_session()` for them.
+
 ## 1. Goal
 
 Build a unified benchmark harness (`office_bench`) that evaluates Office Agent
@@ -35,7 +43,7 @@ delegates scoring to each benchmark's native evaluation scripts/functions.
 
 ```
 office_agent/
-├── src/office_agent/              # existing agent code (unchanged)
+├── src/office_agent/              # existing agent code (binding.py gains per-request workspace wrapper — see §6.1)
 ├── benchmarks/                    # NEW — standalone Python package
 │   ├── pyproject.toml
 │   └── src/office_bench/
@@ -181,7 +189,11 @@ class AgentBridge:
 
 ### 6.1 Single-Turn Flow
 
-1. Set `OFFICE_AGENT_WORKSPACE` env to `workspace_dir`.
+1. Send the per-task workspace in the AG-UI payload:
+   `"state": {"_runtime_workspace": "<abs workspace_dir>"}`. The gateway's
+   binding exports it to `OFFICE_AGENT_WORKSPACE` for the duration of the
+   run (see amendment above) — a client-side env var has no effect on the
+   server process.
 2. POST to AG-UI gateway with SSE streaming:
    ```json
    {
