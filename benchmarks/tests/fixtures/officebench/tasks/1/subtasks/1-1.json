@@ -1,0 +1,11 @@
+{
+  "task_id": "1-1",
+  "instruction": "Create a budget spreadsheet with Q1 expenses",
+  "app_count": 1,
+  "eval_config": {
+    "function": "evaluate_file_exist",
+    "args": {
+      "file_path": "budget.xlsx"
+    }
+  }
+}

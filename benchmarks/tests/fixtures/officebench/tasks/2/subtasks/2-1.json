@@ -1,0 +1,12 @@
+{
+  "task_id": "2-1",
+  "instruction": "Read the CSV and summarize it",
+  "app_count": 2,
+  "eval_config": {
+    "function": "evaluate_contain",
+    "args": {
+      "file_path": "summary.txt",
+      "expected": "total"
+    }
+  }
+}
