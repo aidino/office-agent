@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -106,6 +107,39 @@ class SSEHandler(BaseHTTPRequestHandler):
         pass  # silence server logs
 
 
+class SlowDripHandler(SSEHandler):
+    """Streams one valid frame every 50 ms for ~1.5 s of total wall time.
+
+    Every inter-frame gap is well under the socket read timeout, so only a
+    wall-clock deadline — not requests' per-read timeout — can stop the run.
+    """
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("Content-Length", 0))
+        if length:
+            self.rfile.read(length)
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        run_id = uuid.uuid4().hex[:8]
+        try:
+            self._emit(_sse_line("RUN_STARTED", {"threadId": "t1", "runId": run_id}))
+            for _ in range(30):
+                self._emit(
+                    _sse_line(
+                        "TEXT_MESSAGE_CONTENT", {"messageId": "a1", "delta": "x"}
+                    )
+                )
+                time.sleep(0.05)
+            self._emit(_sse_line("RUN_FINISHED", {"threadId": "t1", "runId": run_id}))
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # client hung up once its deadline hit
+
+    def _emit(self, frame: str) -> None:
+        self.wfile.write(frame.encode())
+        self.wfile.flush()
+
+
 @pytest.fixture()
 def sse_server():
     SSEHandler.request_log = []
@@ -183,6 +217,69 @@ def test_run_task_http_error_returns_error_output(sse_server, tmp_path: Path) ->
     output = bridge.run_task("Boom", tmp_path)
     assert any("[ERROR]" in m.get("content", "") for m in output.messages)
     assert output.tool_calls == []
+
+
+def test_run_task_wall_clock_timeout(tmp_path: Path) -> None:
+    """A slow-drip stream must be cut off by the wall-clock deadline.
+
+    requests' timeout only bounds each individual read; without a deadline
+    a stream dripping one frame every <timeout seconds would run forever.
+    """
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SlowDripHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        bridge = AgentBridge(
+            gateway_url=f"http://127.0.0.1:{port}/agent",
+            timeout_seconds=0.3,
+        )
+        output = bridge.run_task("Slow", tmp_path)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+    # Full stream would take ~1.5 s; the deadline must cut it far earlier.
+    assert output.duration_seconds < 1.2
+    assert any(
+        "timeout" in m.get("content", "").lower() for m in output.messages
+    )
+
+
+def test_run_task_flushes_inflight_tool_call_on_error(
+    sse_server, tmp_path: Path
+) -> None:
+    """A tool call interrupted by RUN_ERROR must still be recorded."""
+    run_id = uuid.uuid4().hex[:8]
+    SSEHandler.sse_body = "".join([
+        _sse_line("RUN_STARTED", {"threadId": "t1", "runId": run_id}),
+        _sse_line(
+            "TOOL_CALL_START",
+            {"toolCallId": "tc5", "toolCallName": "write_document"},
+        ),
+        _sse_line(
+            "TOOL_CALL_ARGS",
+            {"toolCallId": "tc5", "delta": '{"path": "report.docx"}'},
+        ),
+        # no TOOL_CALL_END — the agent crashed mid-call
+        _sse_line(
+            "RUN_ERROR",
+            {"threadId": "t1", "runId": run_id, "message": "crashed mid-call"},
+        ),
+    ])
+    port = sse_server.server_address[1]
+    bridge = AgentBridge(
+        gateway_url=f"http://127.0.0.1:{port}/agent",
+        timeout_seconds=30,
+    )
+    output = bridge.run_task("Interrupted", tmp_path)
+
+    assert output.tool_calls == [
+        {"name": "write_document", "args": {"path": "report.docx"}}
+    ]
+    assert any(
+        "[ERROR] crashed mid-call" in m.get("content", "") for m in output.messages
+    )
 
 
 def test_parses_live_gateway_capture(sse_server, tmp_path: Path) -> None:
@@ -286,5 +383,13 @@ def test_run_session_multi_turn(sse_server, tmp_path: Path) -> None:
     # Unique message ids within each request payload (AG-UI requirement)
     ids = [m["id"] for m in second_req["messages"]]
     assert len(ids) == len(set(ids))
-    # Output merges all turns
+    # Output merges all turns: one assistant message + one tool call each
+    assert [m["content"] for m in output.messages] == [
+        "Response to: Hello",
+        "Response to: Hello",
+    ]
+    assert [tc["name"] for tc in output.tool_calls] == [
+        "write_spreadsheet",
+        "write_spreadsheet",
+    ]
     assert output.duration_seconds >= 0
