@@ -5008,7 +5008,7 @@ correct directory structure, JSON files, backdata CSV row, and report.
 
 
 
-- [ ] **Step 1: Write the integration test**
+- [x] **Step 1: Write the integration test** — `00fabeb`
 
 Create `benchmarks/tests/test_integration.py`:
 
@@ -5166,7 +5166,7 @@ def test_resume_skips_completed_tasks(tmp_path: Path) -> None:
 
 
 
-- [ ] **Step 2: Run the integration test**
+- [x] **Step 2: Run the integration test** — 2/2 PASS (0.14s)
 
 ```bash
 cd benchmarks && uv run pytest tests/test_integration.py -v
@@ -5176,7 +5176,7 @@ Expected: all 2 tests PASS.
 
 
 
-- [ ] **Step 3: Run entire test suite to verify nothing is broken**
+- [x] **Step 3: Run entire test suite to verify nothing is broken** — 165/165 PASS (8.04s)
 
 ```bash
 cd benchmarks && uv run pytest tests/ -v --tb=short
@@ -5186,7 +5186,7 @@ Expected: all tests across all files PASS.
 
 
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit** — `00fabeb`, review fixes in `51ceb49`
 
 ```bash
 git add benchmarks/tests/test_integration.py
