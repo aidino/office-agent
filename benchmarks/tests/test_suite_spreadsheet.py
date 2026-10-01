@@ -137,7 +137,12 @@ def test_evaluate_partial_cell_match(suite: SpreadsheetSuite, tmp_path: Path) ->
 # ── evaluate: Visualization deferred ────────────────────────────────
 
 
-
+def test_evaluate_visualization_deferred(suite: SpreadsheetSuite, tmp_path: Path) -> None:
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "viz-001")
+    result = suite.evaluate(t, tmp_path, _make_output())
+    assert result.score == 0.0
+    assert "deferred" in result.notes.lower() or "visualization" in result.notes.lower()
 
 # ── load_tasks edge cases ──────────────────────────────────────────
 
@@ -190,30 +195,38 @@ def test_load_tasks_skips_entry_without_task_id(tmp_path: Path) -> None:
 # ── setup_workspace ────────────────────────────────────────────────
 
 
-def test_setup_workspace_copies_files(suite: SpreadsheetSuite, tmp_path: Path) -> None:
+def test_setup_workspace_copies_files(tmp_path: Path) -> None:
     """Input files are copied into workspace."""
+    # Build an isolated fixture tree with a spreadsheet file
+    repo = tmp_path / "repo"
+    cat_dir = repo / "data" / "Debugging"
+    cat_dir.mkdir(parents=True)
+
     import json as _json
 
-    # Create a dummy spreadsheet in the fixture tree
-    cat_dir = FIXTURES / "data" / "Debugging"
     xlsx_path = cat_dir / "debug-001.xlsx"
-    created = False
-    if not xlsx_path.exists():
-        wb = Workbook()
-        wb.save(xlsx_path)
-        created = True
+    wb = Workbook()
+    wb.save(xlsx_path)
 
-    try:
-        tasks = suite.load_tasks()
-        t = next(t for t in tasks if t.task_id == "debug-001")
-        suite.setup_workspace(t, tmp_path)
-        # If the file existed as input, it should be copied
-        if t.input_files:
-            for f in t.input_files:
-                assert (tmp_path / f.name).exists()
-    finally:
-        if created:
-            xlsx_path.unlink(missing_ok=True)
+    (cat_dir / "dataset.json").write_text(
+        _json.dumps([{
+            "task_id": "debug-001",
+            "instruction": "Fix it",
+            "category": "Debugging",
+            "spreadsheet_file": "debug-001.xlsx",
+            "expected_cells": {},
+        }])
+    )
+
+    suite = SpreadsheetSuite(repo)
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "debug-001")
+    assert len(t.input_files) == 1
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    suite.setup_workspace(t, workspace)
+    assert (workspace / "debug-001.xlsx").exists()
 
 
 # ── _compare_cell edge cases ──────────────────────────────────────
@@ -249,12 +262,6 @@ def test_evaluate_no_expected_cells(suite: SpreadsheetSuite, tmp_path: Path) -> 
     result = suite.evaluate(t2, tmp_path, _make_output())
     assert result.passed is True
     assert result.score == 1.0
-def test_evaluate_visualization_deferred(suite: SpreadsheetSuite, tmp_path: Path) -> None:
-    tasks = suite.load_tasks()
-    t = next(t for t in tasks if t.task_id == "viz-001")
-    result = suite.evaluate(t, tmp_path, _make_output())
-    assert result.score == 0.0
-    assert "deferred" in result.notes.lower() or "visualization" in result.notes.lower()
 
 
 # ── evaluate: error paths ───────────────────────────────────────────

@@ -25,8 +25,6 @@ from office_bench.suites.base import AgentOutput, Task, TaskResult
 
 _log = logging.getLogger(__name__)
 
-_DETERMINISTIC_CATEGORIES = frozenset({"Debugging", "Financial_Model", "Template"})
-
 
 class SpreadsheetSuite:
     """Adapter for SpreadsheetBench 2 (RUCKBReasoning/SpreadsheetBench-2)."""
