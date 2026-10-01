@@ -3115,7 +3115,7 @@ relation + attribute comparison).
 
 
 
-- [ ] **Step 1: Create fixture test data**
+- [x] **Step 1: Create fixture test data** — `f30c124`
 
 Create `benchmarks/tests/fixtures/pptc/PPT_test_input/Create_new_slides/session_1.json`:
 
@@ -3156,7 +3156,7 @@ Create `benchmarks/tests/fixtures/pptc/PPT_test_input/Edit_ppt_template/template
 
 
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test** — `f30c124` (12 tests, expanded beyond plan with empty-dir, noop-workspace, missing-prediction, extra-slides tests)
 
 Create `benchmarks/tests/test_suite_pptc.py`:
 
@@ -3310,7 +3310,7 @@ def test_evaluate_missing_label_reports_prepare_step(
 
 
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails** — RED confirmed: `ModuleNotFoundError: No module named 'office_bench.suites.pptc'`
 
 ```bash
 cd benchmarks && uv run pytest tests/test_suite_pptc.py -v
@@ -3320,7 +3320,7 @@ Expected: FAIL — `office_bench.suites.pptc` not found.
 
 
 
-- [ ] **Step 4: Implement `benchmarks/src/office_bench/suites/pptc.py`**
+- [x] **Step 4: Implement `benchmarks/src/office_bench/suites/pptc.py`** — `6ab1c0f` (extracted `_parse_session` method, added `logging`, `int(ok)` for matched counter)
 
 ```python
 """PPTC suite adapter — deterministic PPTX-Match evaluation."""
@@ -3530,13 +3530,7 @@ class PPTCSuite:
 
 
 
-- [ ] **Step 5: Run test to verify it passes**
-
-```bash
-cd benchmarks && uv run pytest tests/test_suite_pptc.py -v
-```
-
-Expected: all 7 tests PASS.
+- [x] **Step 5: Run test to verify it passes** — GREEN: 12/12 passed in 0.22s. Coverage 92%. Full suite 122/122.
 
 > **Investigation (after `setup` clones the real submodule):** check the real
 > `PPT_label_*` layout produced by `main.py --prepare` (flat vs nested by
@@ -3548,12 +3542,7 @@ Expected: all 7 tests PASS.
 
 
 
-- [ ] **Step 6: Commit**
-
-```bash
-git add benchmarks/src/office_bench/suites/pptc.py benchmarks/tests/test_suite_pptc.py benchmarks/tests/fixtures/pptc/
-git commit -m "feat(bench): add PPTC deterministic suite adapter"
-```
+- [x] **Step 6: Commit** — `f30c124` (RED), `6ab1c0f` (GREEN), `5b41472` (TDD evidence). Review: `.claude/reviews/task8-pptc-suite-review.md` — APPROVE, 0 critical/high.
 
 ---
 
