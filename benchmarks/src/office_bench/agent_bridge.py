@@ -18,7 +18,7 @@ class AgentBridge:
     def __init__(
         self,
         gateway_url: str = "http://127.0.0.1:18088/agent",
-        timeout_seconds: int = 600,
+        timeout_seconds: float = 600,
     ) -> None:
         self._gateway_url = gateway_url
         self._timeout_seconds = timeout_seconds
@@ -116,6 +116,10 @@ class AgentBridge:
         }
 
         start = time.monotonic()
+        # Wall-clock deadline for the whole call. requests' timeout only
+        # bounds each individual socket read, so a slow-drip stream would
+        # otherwise run forever; the per-line check below enforces the cap.
+        deadline = start + self._timeout_seconds
         resp: requests.Response | None = None
         try:
             resp = requests.post(
@@ -126,7 +130,9 @@ class AgentBridge:
                 timeout=self._timeout_seconds,
             )
             resp.raise_for_status()
-            collected_messages, tool_calls = self._consume_stream(resp)
+            collected_messages, tool_calls = self._consume_stream(
+                resp, deadline, self._timeout_seconds
+            )
         except requests.RequestException as exc:
             collected_messages = [{
                 "role": "assistant",
@@ -144,15 +150,21 @@ class AgentBridge:
         }
 
     @staticmethod
-    def _consume_stream(resp: requests.Response) -> tuple[list[dict], list[dict]]:
-        """Consume the SSE stream until RUN_FINISHED or RUN_ERROR.
+    def _consume_stream(
+        resp: requests.Response,
+        deadline: float | None = None,
+        timeout_seconds: float = 0,
+    ) -> tuple[list[dict], list[dict]]:
+        """Consume the SSE stream until RUN_FINISHED, RUN_ERROR, or deadline.
 
         The gateway emits ``data: {"type": ...}`` frames only — there are no
         ``event:`` lines (ag_ui EventEncoder). Wire keys are camelCase:
         ``messageId``, ``toolCallId``, ``toolCallName``, ``delta``; a
         RUN_ERROR carries its reason in ``message``. Text is accumulated per
         messageId so a multi-message run keeps one assistant message per
-        tool round, and the error message is always appended last.
+        tool round, and the error message is always appended last. Tool
+        calls still in flight when the stream ends are flushed with
+        best-effort args rather than dropped.
         """
         messages: list[dict] = []
         tool_calls: list[dict] = []
@@ -163,6 +175,11 @@ class AgentBridge:
 
         try:
             for line in resp.iter_lines(decode_unicode=True):
+                if deadline is not None and time.monotonic() > deadline:
+                    error_message = (
+                        f"stream exceeded wall-clock timeout ({timeout_seconds}s)"
+                    )
+                    break
                 if not (line or "").startswith("data: "):
                     continue
                 try:
@@ -193,11 +210,10 @@ class AgentBridge:
                     tc_id = data.get("toolCallId", "")
                     if tc_id in active_tools:
                         tc = active_tools.pop(tc_id)
-                        try:
-                            args = json.loads(tc["args"]) if tc["args"] else {}
-                        except json.JSONDecodeError:
-                            args = {"raw": tc["args"]}
-                        tool_calls.append({"name": tc["name"], "args": args})
+                        tool_calls.append({
+                            "name": tc["name"],
+                            "args": AgentBridge._parse_tool_args(tc["args"]),
+                        })
                 elif event == "RUN_FINISHED":
                     break
                 elif event == "RUN_ERROR":
@@ -208,6 +224,14 @@ class AgentBridge:
         finally:
             resp.close()
 
+        # Stream ended (RUN_ERROR, deadline, or EOF) with tool calls still
+        # in flight — record them rather than losing them silently.
+        for tc in active_tools.values():
+            tool_calls.append({
+                "name": tc["name"],
+                "args": AgentBridge._parse_tool_args(tc["args"]),
+            })
+
         for mid in order:
             messages.append({"role": "assistant", "content": "".join(texts[mid])})
         if error_message is not None:
@@ -215,6 +239,14 @@ class AgentBridge:
                 {"role": "assistant", "content": f"[ERROR] {error_message}"}
             )
         return messages, tool_calls
+
+    @staticmethod
+    def _parse_tool_args(raw: str) -> dict:
+        """Parse accumulated tool-call args, keeping unparseable text verbatim."""
+        try:
+            return json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            return {"raw": raw}
 
     @staticmethod
     def _snapshot_files(directory: Path) -> set[str]:
