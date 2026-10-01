@@ -137,6 +137,118 @@ def test_evaluate_partial_cell_match(suite: SpreadsheetSuite, tmp_path: Path) ->
 # ── evaluate: Visualization deferred ────────────────────────────────
 
 
+
+
+# ── load_tasks edge cases ──────────────────────────────────────────
+
+
+def test_load_tasks_empty_repo(tmp_path: Path) -> None:
+    """Repo with no data/ dir returns empty list."""
+    suite = SpreadsheetSuite(tmp_path)
+    assert suite.load_tasks() == []
+
+
+def test_load_tasks_skips_non_dirs(tmp_path: Path) -> None:
+    """Files in data/ dir are skipped."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "not_a_dir.txt").write_text("junk")
+    suite = SpreadsheetSuite(tmp_path)
+    assert suite.load_tasks() == []
+
+
+def test_load_tasks_skips_missing_dataset_json(tmp_path: Path) -> None:
+    """Category dir without dataset.json is skipped."""
+    cat_dir = tmp_path / "data" / "SomeCategory"
+    cat_dir.mkdir(parents=True)
+    suite = SpreadsheetSuite(tmp_path)
+    assert suite.load_tasks() == []
+
+
+def test_load_tasks_skips_bad_json(tmp_path: Path) -> None:
+    """Malformed dataset.json is skipped with a warning."""
+    cat_dir = tmp_path / "data" / "BadCat"
+    cat_dir.mkdir(parents=True)
+    (cat_dir / "dataset.json").write_text("{broken")
+    suite = SpreadsheetSuite(tmp_path)
+    assert suite.load_tasks() == []
+
+
+def test_load_tasks_skips_entry_without_task_id(tmp_path: Path) -> None:
+    """Entry with empty task_id is skipped."""
+    import json as _json
+
+    cat_dir = tmp_path / "data" / "Debugging"
+    cat_dir.mkdir(parents=True)
+    (cat_dir / "dataset.json").write_text(
+        _json.dumps([{"instruction": "no id", "spreadsheet_file": "x.xlsx"}])
+    )
+    suite = SpreadsheetSuite(tmp_path)
+    assert suite.load_tasks() == []
+
+
+# ── setup_workspace ────────────────────────────────────────────────
+
+
+def test_setup_workspace_copies_files(suite: SpreadsheetSuite, tmp_path: Path) -> None:
+    """Input files are copied into workspace."""
+    import json as _json
+
+    # Create a dummy spreadsheet in the fixture tree
+    cat_dir = FIXTURES / "data" / "Debugging"
+    xlsx_path = cat_dir / "debug-001.xlsx"
+    created = False
+    if not xlsx_path.exists():
+        wb = Workbook()
+        wb.save(xlsx_path)
+        created = True
+
+    try:
+        tasks = suite.load_tasks()
+        t = next(t for t in tasks if t.task_id == "debug-001")
+        suite.setup_workspace(t, tmp_path)
+        # If the file existed as input, it should be copied
+        if t.input_files:
+            for f in t.input_files:
+                assert (tmp_path / f.name).exists()
+    finally:
+        if created:
+            xlsx_path.unlink(missing_ok=True)
+
+
+# ── _compare_cell edge cases ──────────────────────────────────────
+
+
+def test_compare_cell_none_vs_empty() -> None:
+    """None actual matches empty expected string."""
+    assert SpreadsheetSuite._compare_cell(None, "", 0.0) is True
+
+
+def test_compare_cell_none_vs_nonempty() -> None:
+    """None actual does not match non-empty expected."""
+    assert SpreadsheetSuite._compare_cell(None, "100", 0.0) is False
+
+
+def test_compare_cell_string_fallback() -> None:
+    """Non-numeric strings use exact string comparison."""
+    assert SpreadsheetSuite._compare_cell("hello", "hello", 0.0) is True
+    assert SpreadsheetSuite._compare_cell("hello", "world", 0.0) is False
+
+
+# ── evaluate: no expected cells (empty check) ──────────────────────
+
+
+def test_evaluate_no_expected_cells(suite: SpreadsheetSuite, tmp_path: Path) -> None:
+    """Task with no expected_cells passes with score 1.0."""
+    tasks = suite.load_tasks()
+    t = next(t for t in tasks if t.task_id == "viz-001")
+    # Override to a deterministic category with no cells
+    from dataclasses import replace
+    t2 = replace(t, category="Template", metadata={"expected_cells": {}, "spreadsheet_file": "x.xlsx"})
+    (tmp_path / "x.xlsx").write_bytes(b"fake")
+    result = suite.evaluate(t2, tmp_path, _make_output())
+    assert result.passed is True
+    assert result.score == 1.0
 def test_evaluate_visualization_deferred(suite: SpreadsheetSuite, tmp_path: Path) -> None:
     tasks = suite.load_tasks()
     t = next(t for t in tasks if t.task_id == "viz-001")
