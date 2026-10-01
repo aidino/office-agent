@@ -151,3 +151,24 @@ Confirmed (R7): a 15-row CSV prints rows `run06`..`run15`, 10 rows, with no "sho
 4. Carry L-3's test gaps into the fix commits — especially one end-to-end `run` test with a real (fake-suite, fake-bridge) Runner rather than a mock, which would have caught M-2/M-3.
 
 **Verdict: REQUEST CHANGES** — two of the four mediums silently write wrong-or-junk rows into the append-only backdata CSV, a third crashes both reporting commands on an input class the codebase's own docstrings call out, and all four are small, test-ready fixes in this repo's established TDD style.
+
+---
+
+## Resolution (2026-10-01)
+
+All seven demonstrable findings fixed in a second TDD loop; re-validated
+**96/96 tests, coverage 100%** (`cli.py` 197/197, package 641/641).
+
+| Finding | Resolution | Commit |
+|---------|------------|--------|
+| M-1 | `report`/`compare` filter loaded rows through `_result_rows()` (dict with truthy `"suite"`) before deriving suites or aggregating. This also shields `aggregate_suite`, whose per-row `.get` turned out to raise `AttributeError` on non-dict stray JSON (a layer below the crash the review demonstrated) — discovered while fixing, covered by the same test. | `620cce1` |
+| M-2 | `--task-id`/`--category` (and `--suite`) split via `_split_csv` — strip whitespace, drop empty segments; a filter flag resolving to zero names exits 1 on stderr before the Runner is constructed, so it can never run zero tasks and append a misleading CSV row. End-to-end test (real Runner, fake suite, mock bridge, via `main()`) pins the honest 2/2 row for `"t1, t2"`. | `620cce1` |
+| M-3 | `--runs`/`--limit` use a ≥1 argparse type (`0`/negatives/garbage → clean exit 2); `--suite all` with an empty registry and a `--suite` value resolving to zero names exit 1 with a stderr message and never create a run. | `620cce1` |
+| M-4 | `compare` prints `not run` in the value column and a bare `—` under Delta/Status for suites absent from either run; no fabricated deltas. | `620cce1` |
+| L-1 | `_cmd_setup` inspects git's returncode (exit 1 + stderr on failure) and catches `OSError` for a missing binary; "Setup complete" prints only after success. Both failure modes tested with a mocked `subprocess`. | `620cce1` |
+| L-2 | `trend` prints `(showing N most recent of M rows)` whenever it truncates; a 12-row test pins the marker and the truncation itself. | `620cce1` |
+| L-3 | All carried: (a) end-to-end `run` test through the real Runner; (b) stray-JSON tests for both reporting commands; (c) the correct `--suite` stripping pinned explicitly; (d) disjoint-suite `compare` test. | `95b0eb3`, `620cce1` |
+
+Observations required no action (argparse edge behavior verified sound by
+the reviewer; path-y `--run-id`, non-editable-install `RESULTS_BASE`, and
+the empty `Available:` cosmetic remain noted for the future).

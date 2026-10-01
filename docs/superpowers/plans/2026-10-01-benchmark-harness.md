@@ -2287,7 +2287,7 @@ results, and (in future tasks) real suite adapters.
 
 
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `benchmarks/tests/test_cli.py`:
 
@@ -2380,7 +2380,7 @@ def test_compare_command(capsys, tmp_path: Path) -> None:
 
 
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_cli.py -v
@@ -2390,7 +2390,7 @@ Expected: FAIL — `office_bench.cli` not found.
 
 
 
-- [ ] **Step 3: Implement `benchmarks/src/office_bench/__main__.py`**
+- [x] **Step 3: Implement `benchmarks/src/office_bench/__main__.py`**
 
 ```python
 """Allow ``python -m office_bench``."""
@@ -2404,7 +2404,7 @@ sys.exit(main())
 
 
 
-- [ ] **Step 4: Implement `benchmarks/src/office_bench/cli.py`**
+- [x] **Step 4: Implement `benchmarks/src/office_bench/cli.py`**
 
 ```python
 """CLI: run, report, list, trend, compare, setup."""
@@ -2663,7 +2663,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 
 
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 ```bash
 cd benchmarks && uv run pytest tests/test_cli.py -v
@@ -2673,7 +2673,7 @@ Expected: all 4 tests PASS.
 
 
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add benchmarks/src/office_bench/cli.py benchmarks/src/office_bench/__main__.py benchmarks/tests/test_cli.py
