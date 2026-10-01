@@ -703,6 +703,20 @@ Build the `AgentBridge` that connects the harness to Office Agent via the
 existing AG-UI SSE gateway. Handles single-turn and multi-turn flows, SSE
 event parsing, workspace isolation, and timeouts.
 
+**Code-review findings (2026-10-01, addressed in this revision — see
+`.claude/reviews/task3-agent-bridge-plan-review.md`):** the original draft
+parsed `event:`-prefixed SSE lines and `toolName`/`error` fields, but the
+gateway's `ag_ui` encoder emits `data: {"type": ...}` frames only, with
+camelCase wire keys (`toolCallName`) and RUN_ERROR reasons in `message`
+(verified against `ag_ui/encoder/encoder.py`, `ag_ui/_generated/models.py`,
+and live captures from the Task 2 probe). The original
+`test_run_task_scans_workspace_files` also pre-created the file before the
+run, contradicting the before/after snapshot diff. This revision: gateway-
+exact framing in parser and mock, mid-run file writes simulated by the mock
+handler, transport errors returned as `[ERROR]` AgentOutput instead of
+raising, per-`messageId` text accumulation, unique history ids, and a
+contract test replaying a live capture.
+
 **Files:**
 
 - Create: `benchmarks/src/office_bench/agent_bridge.py`
@@ -717,7 +731,7 @@ event parsing, workspace isolation, and timeouts.
   - `office_bench.agent_bridge.AgentBridge.run_task(prompt: str, workspace_dir: Path) -> AgentOutput`
   - `office_bench.agent_bridge.AgentBridge.run_session(prompts: list[str], workspace_dir: Path) -> AgentOutput`
 
-**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_agent_bridge.py -v` passes. Tests use a mock HTTP server returning realistic SSE events. Both single-turn and multi-turn paths are covered, plus error and timeout scenarios.
+**DoD:** `uv run --project benchmarks pytest benchmarks/tests/test_agent_bridge.py -v` passes. Tests use a mock HTTP server returning SSE events in the gateway's exact wire format (`data:`-only frames, `"type"` inside the JSON payload). Single-turn, multi-turn, SSE RUN_ERROR, HTTP 500, mid-run file detection, and a live-capture replay are all covered.
 
 
 
@@ -730,7 +744,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -740,49 +753,92 @@ import pytest
 from office_bench.agent_bridge import AgentBridge
 
 
-def _sse_line(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+def _sse_line(event_type: str, data: dict) -> str:
+    """Encode one AG-UI event exactly the way the gateway does.
+
+    The gateway's EventEncoder emits ``data:``-only frames with the event
+    type inside the JSON payload (``ag_ui/encoder/encoder.py``) — there are
+    no ``event:`` lines on this wire.
+    """
+    return f"data: {json.dumps({'type': event_type, **data})}\n\n"
 
 
 def _make_sse_response(prompt_echo: str = "Hello") -> str:
     """Build a minimal valid SSE stream for a single-turn agent run."""
     run_id = uuid.uuid4().hex[:8]
+    msg_id = f"assistant-{uuid.uuid4().hex[:8]}"
     lines = [
-        _sse_line("RUN_STARTED", {"runId": run_id}),
+        _sse_line("RUN_STARTED", {"threadId": "t1", "runId": run_id}),
+        _sse_line("TEXT_MESSAGE_START", {"messageId": msg_id, "role": "assistant"}),
         _sse_line(
             "TEXT_MESSAGE_CONTENT",
-            {"runId": run_id, "delta": f"Response to: {prompt_echo}"},
+            {"messageId": msg_id, "delta": f"Response to: {prompt_echo}"},
         ),
+        _sse_line("TEXT_MESSAGE_END", {"messageId": msg_id}),
         _sse_line(
             "TOOL_CALL_START",
-            {"runId": run_id, "toolCallId": "tc1", "toolName": "write_spreadsheet"},
+            {"toolCallId": "tc1", "toolCallName": "write_spreadsheet"},
         ),
         _sse_line(
             "TOOL_CALL_ARGS",
-            {"runId": run_id, "toolCallId": "tc1", "delta": '{"path": "out.xlsx"}'},
+            {"toolCallId": "tc1", "delta": '{"path": "out.xlsx"}'},
         ),
-        _sse_line("TOOL_CALL_END", {"runId": run_id, "toolCallId": "tc1"}),
-        _sse_line("RUN_FINISHED", {"runId": run_id}),
+        _sse_line("TOOL_CALL_END", {"toolCallId": "tc1"}),
+        _sse_line("RUN_FINISHED", {"threadId": "t1", "runId": run_id}),
     ]
     return "".join(lines)
 
 
 def _make_error_sse() -> str:
+    """RUN_ERROR carries its reason in ``message`` (AG-UI RunErrorEvent)."""
     run_id = uuid.uuid4().hex[:8]
     return "".join([
-        _sse_line("RUN_STARTED", {"runId": run_id}),
-        _sse_line("RUN_ERROR", {"runId": run_id, "error": "Agent crashed"}),
+        _sse_line("RUN_STARTED", {"threadId": "t1", "runId": run_id}),
+        _sse_line(
+            "RUN_ERROR",
+            {"threadId": "t1", "runId": run_id, "message": "Agent crashed"},
+        ),
     ])
+
+
+# Verbatim capture of the live gateway's framing (Task 2 E2E probe,
+# anonymized ids). A contract test guards against mock/wire drift.
+LIVE_CAPTURE_SSE = (
+    'data: {"type":"RUN_STARTED","threadId":"cap","runId":"r2","input":'
+    '{"threadId":"cap","runId":"r2","state":{"_runtime_workspace":"/tmp/x"},'
+    '"messages":[{"id":"m1","role":"user","content":"Read marker"}],'
+    '"tools":[],"context":[],"forwardedProps":{}}}\n\n'
+    'data: {"type":"TEXT_MESSAGE_START","messageId":"assistant-cap1","role":"assistant"}\n\n'
+    'data: {"type":"TEXT_MESSAGE_CONTENT","messageId":"assistant-cap1","delta":"The file contains bench-probe-42."}\n\n'
+    'data: {"type":"STATE_SNAPSHOT","snapshot":{"context":"channel=$ag-ui|chat_id=cap"}}\n\n'
+    'data: {"type":"TEXT_MESSAGE_END","messageId":"assistant-cap1"}\n\n'
+    'data: {"type":"RUN_FINISHED","threadId":"cap","runId":"r2","result":{"text":"The file contains bench-probe-42."}}\n\n'
+)
 
 
 class SSEHandler(BaseHTTPRequestHandler):
     sse_body: str = _make_sse_response()
+    # File the mock "agent" writes mid-run — lands between the bridge's
+    # before/after snapshots, like a real agent writing during the call.
+    write_on_request: Path | None = None
+    status_code: int = 200
     request_log: list[dict] = []
 
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length)) if length else {}
         type(self).request_log.append(body)
+
+        if type(self).status_code != 200:
+            self.send_response(type(self).status_code)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"detail": "gateway exploded"}')
+            return
+
+        if type(self).write_on_request is not None:
+            type(self).write_on_request.write_bytes(b"fake xlsx")
+
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -796,6 +852,8 @@ class SSEHandler(BaseHTTPRequestHandler):
 def sse_server():
     SSEHandler.request_log = []
     SSEHandler.sse_body = _make_sse_response()
+    SSEHandler.write_on_request = None
+    SSEHandler.status_code = 200
     server = ThreadingHTTPServer(("127.0.0.1", 0), SSEHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -816,6 +874,7 @@ def test_run_task_single_turn(sse_server, tmp_path: Path) -> None:
     assert "Response to: Hello" in output.messages[-1]["content"]
     assert len(output.tool_calls) == 1
     assert output.tool_calls[0]["name"] == "write_spreadsheet"
+    assert output.tool_calls[0]["args"] == {"path": "out.xlsx"}
     assert output.duration_seconds >= 0
 
     # Verify request payload structure
@@ -827,17 +886,19 @@ def test_run_task_single_turn(sse_server, tmp_path: Path) -> None:
     assert req["state"]["_runtime_workspace"] == str(tmp_path)
 
 
-def test_run_task_scans_workspace_files(sse_server, tmp_path: Path) -> None:
-    # Pre-create a file to simulate agent writing to workspace
-    (tmp_path / "output.xlsx").write_bytes(b"fake xlsx")
+def test_run_task_detects_files_written_mid_run(sse_server, tmp_path: Path) -> None:
+    """files_created = files that appeared DURING the run, not before it."""
+    SSEHandler.write_on_request = tmp_path / "output.xlsx"
+    (tmp_path / "input.txt").write_text("pre-existing input")  # input, not output
+
     port = sse_server.server_address[1]
     bridge = AgentBridge(
         gateway_url=f"http://127.0.0.1:{port}/agent",
         timeout_seconds=30,
     )
     output = bridge.run_task("Create spreadsheet", tmp_path)
-    # files_created should include files found in workspace
-    assert any(p.name == "output.xlsx" for p in output.files_created)
+
+    assert [p.name for p in output.files_created] == ["output.xlsx"]
 
 
 def test_run_task_error_event(sse_server, tmp_path: Path) -> None:
@@ -848,7 +909,38 @@ def test_run_task_error_event(sse_server, tmp_path: Path) -> None:
         timeout_seconds=30,
     )
     output = bridge.run_task("Fail", tmp_path)
-    assert "Agent crashed" in output.messages[-1].get("content", "")
+    assert any(
+        "[ERROR] Agent crashed" in m.get("content", "") for m in output.messages
+    )
+
+
+def test_run_task_http_error_returns_error_output(sse_server, tmp_path: Path) -> None:
+    """A gateway 500 must produce an error AgentOutput, not an exception."""
+    SSEHandler.status_code = 500
+    port = sse_server.server_address[1]
+    bridge = AgentBridge(
+        gateway_url=f"http://127.0.0.1:{port}/agent",
+        timeout_seconds=30,
+    )
+    output = bridge.run_task("Boom", tmp_path)
+    assert any("[ERROR]" in m.get("content", "") for m in output.messages)
+    assert output.tool_calls == []
+
+
+def test_parses_live_gateway_capture(sse_server, tmp_path: Path) -> None:
+    """Contract test: the parser handles the real gateway's framing."""
+    SSEHandler.sse_body = LIVE_CAPTURE_SSE
+    port = sse_server.server_address[1]
+    bridge = AgentBridge(
+        gateway_url=f"http://127.0.0.1:{port}/agent",
+        timeout_seconds=30,
+    )
+    output = bridge.run_task("Read marker", tmp_path)
+
+    assert output.messages == [
+        {"role": "assistant", "content": "The file contains bench-probe-42."}
+    ]
+    assert output.tool_calls == []
 
 
 def test_run_session_multi_turn(sse_server, tmp_path: Path) -> None:
@@ -872,6 +964,9 @@ def test_run_session_multi_turn(sse_server, tmp_path: Path) -> None:
         == SSEHandler.request_log[1]["state"]["_runtime_workspace"]
         == str(tmp_path)
     )
+    # Unique message ids within each request payload (AG-UI requirement)
+    ids = [m["id"] for m in second_req["messages"]]
+    assert len(ids) == len(set(ids))
     # Output merges all turns
     assert output.duration_seconds >= 0
 ```
@@ -938,18 +1033,27 @@ class AgentBridge:
     def run_session(
         self, prompts: list[str], workspace_dir: Path
     ) -> AgentOutput:
-        """Execute a multi-turn session, maintaining the same threadId."""
+        """Execute a multi-turn session, maintaining the same threadId.
+
+        The gateway builds its prompt from the last user message only
+        (``channel.py::_select_message_payload``), so resending the
+        accumulated history is belt-and-braces: it keeps the session
+        self-contained even if gateway-side state were lost.
+        """
         thread_id = f"bench-{uuid.uuid4().hex[:12]}"
         all_messages: list[dict] = []
         all_tool_calls: list[dict] = []
         total_duration = 0.0
         snapshot_before = self._snapshot_files(workspace_dir)
         history: list[dict] = []
+        next_id = 1  # unique ids across turns, even with >1 assistant message
 
-        for i, prompt in enumerate(prompts):
+        for prompt in prompts:
             run_id = f"run-{uuid.uuid4().hex}"
-            user_msg = {"id": f"m{i * 2 + 1}", "role": "user", "content": prompt}
-            history.append(user_msg)
+            history.append(
+                {"id": f"m{next_id}", "role": "user", "content": prompt}
+            )
+            next_id += 1
 
             result = self._call_gateway(thread_id, run_id, list(history), workspace_dir)
             total_duration += result["duration"]
@@ -958,10 +1062,11 @@ class AgentBridge:
             for msg in result["messages"]:
                 all_messages.append(msg)
                 history.append({
-                    "id": f"m{i * 2 + 2}",
+                    "id": f"m{next_id}",
                     "role": "assistant",
                     "content": msg.get("content", ""),
                 })
+                next_id += 1
 
         snapshot_after = self._snapshot_files(workspace_dir)
         new_files = sorted(snapshot_after - snapshot_before)
@@ -980,7 +1085,12 @@ class AgentBridge:
         messages: list[dict],
         workspace_dir: Path,
     ) -> dict:
-        """POST to the AG-UI gateway and parse the SSE event stream."""
+        """POST to the AG-UI gateway and parse the SSE event stream.
+
+        Transport failures (connection refused, timeout, HTTP >= 400) are
+        returned as an ``[ERROR]`` message instead of raising, so one
+        gateway hiccup cannot abort a whole benchmark run.
+        """
         payload = {
             "threadId": thread_id,
             "runId": run_id,
@@ -994,77 +1104,101 @@ class AgentBridge:
         }
 
         start = time.monotonic()
-        resp = requests.post(
-            self._gateway_url,
-            json=payload,
-            headers={"Accept": "text/event-stream"},
-            stream=True,
-            timeout=self._timeout_seconds,
-        )
-        resp.raise_for_status()
-
-        collected_messages: list[dict] = []
-        tool_calls: list[dict] = []
-        text_parts: list[str] = []
-        active_tools: dict[str, dict] = {}
-        event_type = ""
-
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line:
-                continue
-            if line.startswith("event: "):
-                event_type = line[7:].strip()
-                continue
-            if not line.startswith("data: "):
-                continue
-
-            try:
-                data = json.loads(line[6:])
-            except json.JSONDecodeError:
-                continue
-
-            if event_type == "TEXT_MESSAGE_CONTENT":
-                text_parts.append(data.get("delta", ""))
-            elif event_type == "TOOL_CALL_START":
-                tc_id = data.get("toolCallId", "")
-                active_tools[tc_id] = {
-                    "name": data.get("toolName", ""),
-                    "args": "",
-                }
-            elif event_type == "TOOL_CALL_ARGS":
-                tc_id = data.get("toolCallId", "")
-                if tc_id in active_tools:
-                    active_tools[tc_id]["args"] += data.get("delta", "")
-            elif event_type == "TOOL_CALL_END":
-                tc_id = data.get("toolCallId", "")
-                if tc_id in active_tools:
-                    tc = active_tools.pop(tc_id)
-                    try:
-                        args = json.loads(tc["args"]) if tc["args"] else {}
-                    except json.JSONDecodeError:
-                        args = {"raw": tc["args"]}
-                    tool_calls.append({"name": tc["name"], "args": args})
-            elif event_type == "RUN_FINISHED":
-                break
-            elif event_type == "RUN_ERROR":
-                error_msg = data.get("error", "Unknown error")
-                collected_messages.append(
-                    {"role": "assistant", "content": f"[ERROR] {error_msg}"}
-                )
-                break
-
-        duration = time.monotonic() - start
-
-        if text_parts:
-            collected_messages.append(
-                {"role": "assistant", "content": "".join(text_parts)}
+        try:
+            resp = requests.post(
+                self._gateway_url,
+                json=payload,
+                headers={"Accept": "text/event-stream"},
+                stream=True,
+                timeout=self._timeout_seconds,
             )
+            resp.raise_for_status()
+            collected_messages, tool_calls = self._consume_stream(resp)
+        except requests.RequestException as exc:
+            collected_messages = [{
+                "role": "assistant",
+                "content": f"[ERROR] gateway request failed: {exc}",
+            }]
+            tool_calls = []
 
         return {
             "messages": collected_messages,
             "tool_calls": tool_calls,
-            "duration": duration,
+            "duration": time.monotonic() - start,
         }
+
+    @staticmethod
+    def _consume_stream(resp: requests.Response) -> tuple[list[dict], list[dict]]:
+        """Consume the SSE stream until RUN_FINISHED or RUN_ERROR.
+
+        The gateway emits ``data: {"type": ...}`` frames only — there are no
+        ``event:`` lines (ag_ui EventEncoder). Wire keys are camelCase:
+        ``messageId``, ``toolCallId``, ``toolCallName``, ``delta``; a
+        RUN_ERROR carries its reason in ``message``. Text is accumulated per
+        messageId so a multi-message run keeps one assistant message per
+        tool round, and the error message is always appended last.
+        """
+        messages: list[dict] = []
+        tool_calls: list[dict] = []
+        active_tools: dict[str, dict] = {}
+        texts: dict[str, list[str]] = {}
+        order: list[str] = []
+        error_message: str | None = None
+
+        try:
+            for line in resp.iter_lines(decode_unicode=True):
+                if not (line or "").startswith("data: "):
+                    continue
+                try:
+                    data = json.loads(line[len("data: "):])
+                except json.JSONDecodeError:
+                    continue
+
+                event = data.get("type", "")
+
+                if event in ("TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT"):
+                    mid = data.get("messageId", "")
+                    if mid and mid not in texts:
+                        texts[mid] = []
+                        order.append(mid)
+                    if event == "TEXT_MESSAGE_CONTENT" and mid:
+                        texts[mid].append(data.get("delta", ""))
+                elif event == "TOOL_CALL_START":
+                    tc_id = data.get("toolCallId", "")
+                    active_tools[tc_id] = {
+                        "name": data.get("toolCallName", ""),
+                        "args": "",
+                    }
+                elif event == "TOOL_CALL_ARGS":
+                    tc_id = data.get("toolCallId", "")
+                    if tc_id in active_tools:
+                        active_tools[tc_id]["args"] += data.get("delta", "")
+                elif event == "TOOL_CALL_END":
+                    tc_id = data.get("toolCallId", "")
+                    if tc_id in active_tools:
+                        tc = active_tools.pop(tc_id)
+                        try:
+                            args = json.loads(tc["args"]) if tc["args"] else {}
+                        except json.JSONDecodeError:
+                            args = {"raw": tc["args"]}
+                        tool_calls.append({"name": tc["name"], "args": args})
+                elif event == "RUN_FINISHED":
+                    break
+                elif event == "RUN_ERROR":
+                    error_message = (
+                        data.get("message") or data.get("error") or "Unknown error"
+                    )
+                    break
+        finally:
+            resp.close()
+
+        for mid in order:
+            messages.append({"role": "assistant", "content": "".join(texts[mid])})
+        if error_message is not None:
+            messages.append(
+                {"role": "assistant", "content": f"[ERROR] {error_message}"}
+            )
+        return messages, tool_calls
 
     @staticmethod
     def _snapshot_files(directory: Path) -> set[str]:
@@ -1086,7 +1220,7 @@ class AgentBridge:
 cd benchmarks && uv run pytest tests/test_agent_bridge.py -v
 ```
 
-Expected: all 4 tests PASS.
+Expected: all 6 tests PASS.
 
 
 
@@ -5073,7 +5207,7 @@ git commit -m "test(bench): add end-to-end integration test for full pipeline"
 | --------- | -------------------------------------- | ---------------------------- | ------------ | ----- |
 | 1         | Scaffold + Data Types                  | 8 create, 1 modify           | 9            | 1     |
 | 2         | Per-Request Workspace Binding (agent)  | 1 modify, 1 test             | 4            | 1     |
-| 3         | Agent Bridge                           | 1 create, 1 test             | 4            | 1     |
+| 3         | Agent Bridge                           | 1 create, 1 test             | 6            | 1     |
 | 4         | Results + Backdata + Reference         | 2 create, 1 test             | 11           | 1     |
 | 5         | Runner Orchestrator                    | 1 create, 1 test             | 11           | 1     |
 | 6         | CLI                                    | 2 create, 1 test             | 4            | 1     |
@@ -5083,4 +5217,4 @@ git commit -m "test(bench): add end-to-end integration test for full pipeline"
 | 10        | FORTE + LLM Judge (grade_one)          | 2 create, 2 test, fixtures   | 10           | 4     |
 | 11        | Setup Command + Submodules             | 1 create, 2 modify, 1 test   | 2            | 5     |
 | 12        | Integration Test                       | 1 test                       | 2            | 5     |
-| **Total** |                                        | **\~28 files**               | **80 tests** |       |
+| **Total** |                                        | **\~28 files**               | **82 tests** |       |
