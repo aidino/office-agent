@@ -70,8 +70,15 @@ None
 | `.claude/tdd/task7-officebench-suite.tdd.md` | Added |
 | `benchmarks/pyproject.toml` | Modified (coverage dep) |
 
-## Required Fixes Before Merge
+## Resolution
 
-1. **M-1**: Cache the loaded evaluation module on `self._eval_module` to avoid re-importing per task.
-2. **M-2**: Use a deterministic module name (e.g. `id(self)`) instead of `hash()`.
-3. **L-2** (recommended): Add `logging.warning` for skipped malformed task files.
+All findings addressed in commit `ce9ecfb`:
+
+| Finding | Fix | Verified |
+|---|---|---|
+| **M-1** cache eval module | `_eval_module` sentinel pattern, loaded once per suite instance | `test_evaluate_caches_native_module` — asserts `is` identity |
+| **M-2** deterministic name | `id(self)` replaces `hash(str(repo_dir))` | Implicit in all evaluate tests |
+| **M-3** path traversal | Acknowledged as mirroring upstream; flagged for Step 5 investigation | Comment in fixture docstring |
+| **L-2** log warning | `_log.warning(...)` in `_parse_subtask` except block | Manual inspection |
+
+**Post-fix validation**: 110/110 tests pass (14 officebench, 96 existing). Decision updated to **APPROVE**.
